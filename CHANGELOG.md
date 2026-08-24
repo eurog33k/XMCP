@@ -7,6 +7,7 @@ All notable changes to XMCP will be documented here.
 ## [1.3.0] - 2026-08-24
 
 ### Added
+- `save_project` tool — saves the IDE's in-memory project to disk via `DoCommand "SaveFile"`. Together with `set_code` this gives a complete round trip that needs no project reload, which matters on Windows where `revert_project` is unavailable
 - **Windows support.** All platform-dependent paths now live in a new `Platform` module: IPC socket discovery, the debug log location, and the documentation root. Verified on Windows 11 with Xojo 2026r1.1 — MCP handshake, tool listing, IDE connection, and documentation lookup all work
 - IPC socket discovery now mirrors `FindIPCPath` from Xojo's shipped IDECommunicator v2 example, probing candidate *folders* for writability instead of testing the socket path itself. On Windows the socket resolves to `%LOCALAPPDATA%\Temp\XojoIDE`
 - `XOJO_IPCPATH` is now honoured, so XMCP can talk to a specific IDE when several are running side by side

@@ -48,6 +48,7 @@ Inherits MCPKit.ServerApplication
 		  New BuildProject, _
 		  New RunProject, _
 		  New StopProject, _
+		  New SaveProject, _
 		  New CreateProjectItem, _
 		  New RunIDEScript, _
 		  New GetProjectInfo, _
@@ -60,14 +61,14 @@ Inherits MCPKit.ServerApplication
 		  New EstimateRequestCost, _
 		  New GetDebugLog _
 		  )
-
+		  
 		  // get_system_log reads the macOS unified log; there is no equivalent elsewhere,
 		  // so it is not advertised on other platforms. RegisterTools appends, so this
 		  // simply adds to the list above.
 		  #If TargetMacOS Then
 		    RegisterTools(New GetSystemLog)
 		  #EndIf
-
+		  
 		  If Verbose Then System.DebugLog("XMCP server configured with " + mTools.Count.ToString + " tools.")
 		  
 		End Sub
@@ -81,9 +82,9 @@ Inherits MCPKit.ServerApplication
 		    // A literal, not mTools.Count: DidParseOptions runs before Configure, so no
 		    // tools are registered yet at this point.
 		    #If TargetMacOS Then
-		      Print("MCP Tools (22):")
+		      Print("MCP Tools (23):")
 		    #Else
-		      Print("MCP Tools (21):")
+		      Print("MCP Tools (22):")
 		    #EndIf
 		    Print("")
 		    Print("  IDE Tools:")
@@ -97,6 +98,7 @@ Inherits MCPKit.ServerApplication
 		    Print("  build_project        Build the project (returns path or errors)")
 		    Print("  run_project          Run the project in debug mode")
 		    Print("  stop_project         Stop the running debug session")
+		    Print("  save_project         Save the project to disk (File > Save)")
 		    Print("  create_project_item  Create a new class, method, property, etc.")
 		    Print("  run_ide_script       Execute an arbitrary IDE script")
 		    Print("  get_project_info     Get project path, Xojo version, and location")
@@ -246,6 +248,7 @@ Inherits MCPKit.ServerApplication
 		  
 		End Function
 	#tag EndMethod
+
 
 	#tag Property, Flags = &h0, Description = 5061746820746F20586F6A6F20646F63756D656E746174696F6E206469726563746F72792E
 		DocsPath As FolderItem

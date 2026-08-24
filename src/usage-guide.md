@@ -6,11 +6,12 @@ This file is automatically loaded as an MCP resource when you connect to XMCP. I
 
 ## What XMCP can do
 
-XMCP gives you direct control over the Xojo IDE via 22 tools (21 on Windows — see *Platform differences* below):
+XMCP gives you direct control over the Xojo IDE via 23 tools (22 on Windows — see *Platform differences* below):
 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
 - **Build and run**: `build_project`, `run_project`, `stop_project`
+- **Save**: `save_project` — writes the IDE's in-memory project to disk. Call this after `set_code`, `create_project_item`, `constant_value` or `get_item_description` so your changes reach disk
 - **Create items**: `create_project_item`
 - **Inspect and modify**: `get_item_description`, `constant_value`, `get_project_info`, `revert_project`
 - **IDE scripting**: `run_ide_script` (escape hatch for anything not covered)
@@ -87,7 +88,7 @@ Consequences when writing code for the user:
 
 > **Windows:** step 2 below (`revert_project`) does not work - see *Platform differences*. Write the file, then ask the user to reload the project in the IDE.
 >
-> **`build_project` builds the IDE's in-memory project, not the files on disk.** So on Windows, editing a file on disk and then building will build the *old* code and report success. Either get the project reloaded first, or avoid the disk route: `set_code` writes into the IDE directly, and `run_ide_script` with `DoCommand "SaveFile"` saves it to disk. That loop needs no reload in either direction and is the better default on Windows.
+> **`build_project` builds the IDE's in-memory project, not the files on disk.** So on Windows, editing a file on disk and then building will build the *old* code and report success. Either get the project reloaded first, or avoid the disk route entirely: `set_code` writes into the IDE directly and `save_project` writes it out to disk. That `set_code` → `save_project` → `build_project` loop needs no reload in either direction and is the better default on Windows.
 
 When IDE tools cannot access an item, edit the source files directly on disk and reload the project.
 

@@ -26,6 +26,7 @@ Class=SetSelectedText;Tools/SetSelectedText.xojo_code;&hFFFFFFFFAAAA08FF;&hFFFFF
 Class=BuildProject;Tools/BuildProject.xojo_code;&hFFFFFFFFAAAA09FF;&hFFFFFFFFAAAA01FF;false
 Class=RunProject;Tools/RunProject.xojo_code;&hFFFFFFFFAAAA0AFF;&hFFFFFFFFAAAA01FF;false
 Class=StopProject;Tools/StopProject.xojo_code;&hFFFFFFFFAAAA0BFF;&hFFFFFFFFAAAA01FF;false
+Class=SaveProject;Tools/SaveProject.xojo_code;&hFFFFFFFFAAAA5BFF;&hFFFFFFFFAAAA01FF;false
 Class=CreateProjectItem;Tools/CreateProjectItem.xojo_code;&hFFFFFFFFAAAA0CFF;&hFFFFFFFFAAAA01FF;false
 Class=RunIDEScript;Tools/RunIDEScript.xojo_code;&hFFFFFFFFAAAA0DFF;&hFFFFFFFFAAAA01FF;false
 Class=GetProjectInfo;Tools/GetProjectInfo.xojo_code;&hFFFFFFFFAAAA0EFF;&hFFFFFFFFAAAA01FF;false
