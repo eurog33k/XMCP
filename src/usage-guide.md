@@ -84,6 +84,24 @@ Consequences when writing code for the user:
 
 ---
 
+## Two routes, and why not to mix them
+
+The IDE keeps its own in-memory copy of the project. There are two ways to change code, and they write to different places:
+
+| Route | Writes to | Gets to the other side by |
+|---|---|---|
+| `set_code`, `create_project_item`, `constant_value` | the IDE's memory | `save_project` |
+| Editing `.xojo_code` / `.xojo_window` on disk | the files | `revert_project` (macOS/Linux) or a manual reload (Windows) |
+
+**Do not interleave them.** If you edit files on disk and then anything saves from the IDE side - `save_project`, or the user pressing Ctrl/Cmd+S - the IDE writes its in-memory copy over your edits and they are gone. Likewise a reload discards unsaved IDE changes.
+
+Pick one route per change and finish it:
+
+- **Preferred:** `set_code` → `save_project`. Fully scripted, no reload, no clobber risk. Use this for anything IDE scripting can reach.
+- **Fallback:** write the file, then reload before touching the IDE again. Needed for window event handlers and items `get_code` cannot reach. On Windows the reload is manual, so the window for clobbering is wider - never call `save_project` after editing files on disk.
+
+---
+
 ## Fallback: direct file editing
 
 > **Windows:** step 2 below (`revert_project`) does not work - see *Platform differences*. Write the file, then ask the user to reload the project in the IDE.
