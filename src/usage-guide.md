@@ -86,7 +86,8 @@ XMCP runs on macOS and Windows. What changes:
 | IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (no file exists at that path — the endpoint is a named pipe) |
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | `get_system_log` | available | **not registered** — no unified-log equivalent |
-| `revert_project` | works | works — briefly opens a throwaway project to keep the IDE alive |
+| `revert_project` | works | works — opens an empty project first if yours is the only window |
+| `delete_project_item` | works | **does not work** — the IDE command is not implemented there; ask the user to delete in the IDE |
 | Docs location | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_project_info` paths | POSIX paths | long paths (XMCP converts the IDE's 8.3 short paths back) |
 

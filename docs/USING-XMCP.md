@@ -192,6 +192,7 @@ Linux, so write to a log file there instead.
 | Documentation | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_system_log` | available | **not available** — `System.DebugLog` goes to `OutputDebugString`, which only an attached debugger sees |
 | `revert_project` | closes and reopens the project | same, but first opens an empty project to hold the IDE up — skipped if you already have another project open |
+| `delete_project_item` | works | **not available** — `DoCommand "DeleteSelection"` is not implemented on Windows |
 
 Everything else behaves identically. Two Windows-specific rules:
 

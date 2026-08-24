@@ -3,7 +3,7 @@ Protected Class DeleteProjectItem
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("delete_project_item", "Deletes a project item from the project - a method, property, constant, class, module or folder. An explicit item_path is required; this never acts on whatever happens to be selected. Deleting a class, module or folder deletes everything inside it. The change is in the IDE only until the project is saved, so revert_project undoes it up to that point; after a save it is permanent.")
+		  Super.Constructor("delete_project_item", "Deletes a project item - a method, property, constant, class, module or folder. WORKS ON macOS ONLY: the underlying IDE scripting command is not implemented on Windows, where this tool reports failure and changes nothing, so ask the user to delete the item in the IDE instead. An explicit item_path is required; this never acts on whatever happens to be selected. Deleting a class, module or folder deletes everything inside it. The change is in the IDE only until the project is saved, so revert_project undoes it up to that point; after a save it is permanent.")
 
 		  Parameters.Add(New MCPKit.ToolParameter("item_path", MCPKit.ToolParameterTypes.String_, _
 		  "Dot-separated path of the item to delete (e.g. 'Module1.Untitled', 'MyClass').", _
@@ -36,12 +36,21 @@ Inherits MCPKit.Tool
 		  // 2. Delete the selection. DoCommand "DeleteSelection" does not answer - deleting the
 		  //    item takes the script host with it - so the reply is not waited on for long and
 		  //    step 3 is what decides.
+		  //
+		  //    Xojo documents this command as "Not implemented", and on Windows that is exactly
+		  //    what it is: it does nothing (verified on 2026r1.1). On macOS it does delete, and
+		  //    deletes precisely the named item - verified with a module holding two methods and
+		  //    a sibling class, where only the named method disappeared. It is still fired on
+		  //    every platform rather than refused up front, so that the tool starts working by
+		  //    itself if a future Xojo implements it; step 3 guarantees no false success.
 		  Call App.IDE.SendAndReceive("DoCommand ""DeleteSelection""", 5000)
 
 		  // 3. Gone?
 		  If Reaches(itemPath) Then
 		    Return MCPKit.ToolResult.Failure("The item is still present, so nothing was deleted: " + _
-		    itemPath + ". Some items can only be removed in the IDE.")
+		    itemPath + ". The IDE scripting command that removes a project item is documented as " + _
+		    "not implemented, and on Windows it really does nothing - this tool only works on " + _
+		    "macOS. Ask the user to delete the item in the IDE instead.")
 		  End If
 
 		  Return MCPKit.ToolResult.Success("Deleted: " + itemPath + ". This is not saved to disk yet - " + _

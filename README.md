@@ -196,7 +196,9 @@ Sets a method or property declaration — name, parameters, return type, scope, 
 
 #### `delete_project_item`
 
-Deletes a project item — method, property, constant, class, module or folder. Requires an explicit `item_path` and never acts on the current selection. Deleting a container deletes its contents. Reversible with `revert_project` until the project is saved.
+**macOS only.** Deletes a project item — method, property, constant, class, module or folder. Requires an explicit `item_path` and never acts on the current selection. Deleting a container deletes its contents. Reversible with `revert_project` until the project is saved.
+
+On Windows the underlying `DoCommand "DeleteSelection"` is documented as not implemented and does nothing, so the tool reports failure and changes nothing — delete the item in the IDE instead. It is still attempted rather than refused outright, so it will start working on its own if a future Xojo implements it.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
