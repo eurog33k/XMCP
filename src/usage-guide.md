@@ -6,7 +6,7 @@ This file is automatically loaded as an MCP resource when you connect to XMCP. I
 
 ## What XMCP can do
 
-XMCP gives you direct control over the Xojo IDE via 23 tools (22 on Windows — see *Platform differences* below):
+XMCP gives you direct control over the Xojo IDE via 25 tools (24 on Windows — see *Platform differences* below):
 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
@@ -14,6 +14,7 @@ XMCP gives you direct control over the Xojo IDE via 23 tools (22 on Windows — 
 - **Save**: `save_project` — writes the IDE's in-memory project to disk. Call this after `set_code`, `create_project_item`, `constant_value` or `get_item_description` so your changes reach disk
 - **Create items**: `create_project_item`
 - **Inspect and modify**: `get_item_description`, `constant_value`, `get_project_info`, `revert_project`
+- **Create a usable method**: `create_project_item` makes an unnamed `Untitled` item, then `set_declaration` gives it a name, parameters, return type and scope, then `set_code` fills in the body. All three are needed - `set_code` writes bodies only, so passing a `Function ...` signature line as code just writes it as text. `delete_project_item` removes an item if you created the wrong thing
 - **IDE scripting**: `run_ide_script` (escape hatch for anything not covered)
 - **Documentation**: `search_docs`, `lookup_class`, `list_doc_topics`
 - **Debugging**: `get_debug_log`, `get_system_log` (macOS only)
@@ -27,7 +28,7 @@ XMCP gives you direct control over the Xojo IDE via 23 tools (22 on Windows — 
 
 `list_project_items` shows contained project *items* — the classes and modules inside a folder or module — not the methods, properties or events inside a class. Listing a class often returns `{}`.
 
-**Solution**: navigate to members by name instead. `select_project_item`, `get_code` and `set_code` all accept a full dot-separated path and reach methods, properties and event implementations:
+**Solution**: navigate to members by name instead. `select_project_item`, `get_code`, `set_code`, `set_declaration` and `delete_project_item` all accept a full dot-separated path and reach methods, properties and event implementations:
 
 ```
 select_project_item(item_path: "App.Configure")     ✓  → "Selected: App.Configure (Event Implementation)"
@@ -37,6 +38,8 @@ list_project_items(location: "IDECommunicator")     →  {}   (members are not i
 ```
 
 A path that does not exist is reported as `ERROR: Could not navigate to: ...` rather than silently reading the wrong item.
+
+`lookup_class` returns Xojo's shipped documentation verbatim. If a member the compiler accepts is missing from it, the documentation omits it - the compiler is authoritative, not the tool. Do not tell the user their code will not compile on the strength of a doc lookup.
 
 **Overloads are the exception.** A name with several signatures - `Module1.GetFileExtention(f As FolderItem)` and `Module1.GetFileExtention(s As String)` - resolves to one of them, with nothing in the result saying which, and there is no way to name a signature. When you know a method is overloaded, read the `.xojo_code` file on disk to see every version.
 
@@ -54,7 +57,21 @@ The Xojo IDE accepts only one IPC connection at a time. If the MCP client sends 
 
 **Solution**: Always use sequential tool calls when working with XMCP.
 
-### 4. IPC socket timing after navigation
+### 4. `run_ide_script` returns only the first `Print`
+
+The IDE answers with the value of the **first** `Print` in a script and discards every later one. `Print "one"` followed by `Print "two"` returns `one`. Xojo's protocol documentation says the last value; measured behaviour on 2025r3.1 is the first.
+
+This is a trap worth knowing, because it looks like something else. A script that prints a status line, runs a command, then prints the result returns the *status line* - so the command appears to have produced nothing, or to have killed the script. It didn't; the second `Print` was simply thrown away.
+
+```
+Print "before: " + Location          ' <- this is what comes back
+ChangeDeclaration("X", "", "", 0, "")
+Print "after: " + Location           ' <- discarded, though it ran fine
+```
+
+**Solution**: print once, at the point whose value you want. To confirm an effect, make a second `run_ide_script` call. Also note that a command with no value to give - `PropertyValue` on an item it does not support - yields an empty result, which is not a failure either.
+
+### 5. IPC socket timing after navigation
 
 After certain navigation operations, the Xojo IDE briefly closes its IPC socket (~2–3 seconds). XMCP retries automatically (up to 5 × 1 second), so most calls recover. If a tool times out immediately after navigation, retry once.
 

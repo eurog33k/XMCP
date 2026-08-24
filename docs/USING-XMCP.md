@@ -75,8 +75,15 @@ you are on; pass one to cross-compile (`19` Windows 64-bit Intel, `9` macOS Univ
 `17` Linux 64-bit Intel — the full table is in the tool's description). "Run it" → `run_project`,
 and `stop_project` to end the debug session.
 
+**Create a method from scratch.** Three calls, because the IDE separates them: `create_project_item`
+makes an unnamed `Untitled` method, `set_declaration` gives it a name, parameters, return type and
+scope, and `set_code` writes the body. `set_code` alone won't do it — it writes bodies only, so a
+`Function …` signature passed as code lands as literal text. `delete_project_item` removes an item
+if you made the wrong one.
+
 **Anything not covered.** "Run this IDE script: …" → `run_ide_script` is the escape hatch for any
-IDE scripting command without a dedicated tool.
+IDE scripting command without a dedicated tool. One trap: the IDE returns only the **first** `Print`
+in a script and discards the rest, so print once, at the point whose value you want.
 
 ---
 
@@ -101,6 +108,8 @@ IDE scripting command without a dedicated tool.
 | An overloaded method reads back one version | paths carry no signature, so the IDE resolves the name to one of them | read the `.xojo_code` file on disk when you need to see every overload |
 | Two tool calls at once fail | the IDE accepts one IPC connection at a time | keep calls sequential |
 | A call right after navigation times out | the IDE briefly closes its socket after some navigation | XMCP retries automatically; if one still fails, just retry |
+| `run_ide_script` seems to ignore a command | only the first `Print` is returned; a status line printed first is what comes back | print once, and verify effects in a second call |
+| `lookup_class` omits a member the compiler accepts | it returns Xojo's shipped docs verbatim, and those docs are sometimes incomplete | treat the compiler as authoritative, not the doc lookup |
 
 ---
 
@@ -111,7 +120,7 @@ and finish it.**
 
 | Route | Writes to | Gets to the other side by |
 |---|---|---|
-| `set_code`, `create_project_item`, `constant_value` | the IDE's memory | `save_project` |
+| `set_code`, `set_declaration`, `create_project_item`, `delete_project_item`, `constant_value` | the IDE's memory | `save_project` |
 | Editing `.xojo_code` / `.xojo_window` on disk | the files | `revert_project` |
 
 **The way to lose work** is to interleave them. Edit a file on disk, then let anything save from
@@ -176,7 +185,7 @@ Linux, so write to a log file there instead.
 
 | | macOS | Windows |
 |---|---|---|
-| Tools available | 23 | 22 |
+| Tools available | 25 | 24 |
 | IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (a named pipe — no file exists at that path) |
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | Documentation | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |

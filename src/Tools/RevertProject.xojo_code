@@ -116,22 +116,21 @@ Inherits MCPKit.Tool
 		      "been saved to disk. Open a saved project and try again.")
 		    End If
 
-		    // 2. Normalise to a native long path for the reopen and for error messages. On
-		    //    Windows ProjectShellPath is the 8.3 short path; OpenFile takes either form.
+		    // 2. Resolve the path once: needed as a long path for the reopen and for messages,
+		    //    and as a FolderItem to compare against what the IDE reports later.
+		    Var target As FolderItem = FileFromShellPath(shellPath)
 		    Var nativePath As String = shellPath
-		    Try
-		      Var projectFile As New FolderItem(shellPath, FolderItem.PathModes.Shell)
-		      If projectFile <> Nil And projectFile.Exists Then nativePath = projectFile.NativePath
-		    Catch e As RuntimeException
-		      // Keep the shell path - OpenFile accepts it too.
-		    End Try
+		    If target <> Nil And target.Exists Then nativePath = target.NativePath
 
 		    // 3. Close, discarding unsaved IDE changes: reloading from disk is the whole point.
 		    //    The False suppresses the save prompt. The reply is ignored - closing the project
 		    //    tears down the script host that would have answered it, so step 4 is the test.
 		    Call App.IDE.SendAndReceive("CloseProject(False)" + EndOfLine + "Print ""closed""", 20000)
 
-		    If ProjectPathFromIDE(reachable) <> "" Then
+		    // Compare against the target, not against "" - if the IDE has another project open
+		    // it becomes the current one after the close, so an empty path is not the signal.
+		    Var afterClose As String = ProjectPathFromIDE(reachable)
+		    If reachable And SamePath(afterClose, target) Then
 		      Return MCPKit.ToolResult.Failure("CloseProject did not take effect - the project is " + _
 		      "still open and has not been reloaded from disk. Nothing was changed.")
 		    End If
@@ -145,7 +144,7 @@ Inherits MCPKit.Tool
 		    Var openResponse As JSONItem = App.IDE.SendAndReceive( _
 		    "OpenFile """ + nativePath + """" + EndOfLine + "Print ""reopened""", 30000)
 
-		    If ProjectPathFromIDE(reachable) = "" Then
+		    If Not SamePath(ProjectPathFromIDE(reachable), target) Then
 		      Var detail As String = ""
 		      If openResponse = Nil Then
 		        detail = App.IDE.LastErrorMessage

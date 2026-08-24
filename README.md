@@ -2,7 +2,7 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants direct control over the [Xojo IDE](https://www.xojo.com). Built in Xojo using [MCPKit](https://github.com/gkjpettet/MCPKit) by Garry Pettet.
 
-XMCP connects to the Xojo IDE via its IPC socket and exposes 23 tools (22 on Windows, where `get_system_log` has no equivalent) that let an AI navigate projects, read and write code, build, run and save projects, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
+XMCP connects to the Xojo IDE via its IPC socket and exposes 25 tools (24 on Windows, where `get_system_log` has no equivalent) that let an AI navigate projects, read and write code, build, run and save projects, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
 
 XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP resource. Compatible clients (e.g. Claude Code) fetch it automatically at session start, giving the AI immediate awareness of XMCP's capabilities, known IDE scripting limitations, and fallback strategies — without any extra configuration. You can edit the file to add project-specific notes without rebuilding.
 
@@ -180,6 +180,27 @@ Stops the currently running debug session.
 Saves the current Xojo project to disk (File > Save). The IDE holds changes made by `set_code`, `create_project_item`, `constant_value` and `get_item_description` in memory until saved. Note that `build_project` builds the **in-memory** project, so saving is about getting changes onto disk (for git, for external tools, or for editing files directly), not about making them visible to a build.
 
 *No parameters.*
+
+#### `set_declaration`
+
+Sets a method or property declaration — name, parameters, return type, scope, and what it implements. `create_project_item` creates an unnamed item, so this is the second half of making a usable method: create, declare, then `set_code` for the body. Also renames existing members. For a property, `parameters` carries the default value.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | String | Yes | New name, without parameters or return type. |
+| `location` | String | No | Path to navigate to first. Default: current selection. |
+| `parameters` | String | No | Parameter list without brackets, e.g. `fi As FolderItem`. For a property, its default value. |
+| `return_type` | String | No | e.g. `String`. Empty for a subroutine. |
+| `scope` | Integer | No | `0` Public, `1` Protected, `2` Private. Default: 0. |
+| `implements` | String | No | Interface method being implemented. |
+
+#### `delete_project_item`
+
+Deletes a project item — method, property, constant, class, module or folder. Requires an explicit `item_path` and never acts on the current selection. Deleting a container deletes its contents. Reversible with `revert_project` until the project is saved.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `item_path` | String | Yes | Dot-separated path of the item to delete. |
 
 #### `create_project_item`
 
@@ -363,7 +384,7 @@ On startup, XMCP scans `SpecialFolder.ApplicationData/Xojo/Xojo/` - `~/Library/A
 
 ## Known Limitations
 
-- **`get_system_log` is macOS-only** — it reads the macOS unified log, which has no equivalent elsewhere. On Windows `System.DebugLog` goes to `OutputDebugString`, visible only to an attached debugger, so the tool is not registered there and XMCP exposes 22 tools instead of 23. Use a file-based `App.UnhandledException` handler with `get_debug_log` instead.
+- **`get_system_log` is macOS-only** — it reads the macOS unified log, which has no equivalent elsewhere. On Windows `System.DebugLog` goes to `OutputDebugString`, visible only to an attached debugger, so the tool is not registered there and XMCP exposes 24 tools instead of 25. Use a file-based `App.UnhandledException` handler with `get_debug_log` instead.
 - **`revert_project` briefly opens a second project on Windows** — reloading needs `CloseProject(False)` + `OpenFile`, and on Windows closing the last project window quits the IDE. So the close is performed while a generated throwaway project (`%TEMP%\XMCP Host`) holds the IDE open; it is closed again afterwards, so you may see a project window appear and disappear. On both platforms the reload discards unsaved IDE changes and loses open editor tabs, since the project really is closed and reopened.
 - **Do not set `XOJO_AUTOMATION=TRUE` on Windows** — Xojo documents this variable for build automation (it skips the Feedback Crash and Restore Previous Project dialogs), but on Windows the IDE exits immediately after loading a project when it is set. Verified 2026-08-24 with Xojo 2026r1.1: the same `Start-Process` launch keeps the project open with the variable unset or `FALSE`, and shuts the IDE down with it set to `TRUE`. XMCP then reports `No IDE listener` for every tool, because there is no IDE left to talk to.
 - **Linux is untested** — the path resolution in `Platform.xojo_code` covers it, but nothing has been verified on Linux.

@@ -49,6 +49,8 @@ Inherits MCPKit.ServerApplication
 		  New RunProject, _
 		  New StopProject, _
 		  New SaveProject, _
+		  New SetDeclaration, _
+		  New DeleteProjectItem, _
 		  New CreateProjectItem, _
 		  New RunIDEScript, _
 		  New GetProjectInfo, _
@@ -94,6 +96,8 @@ Inherits MCPKit.ServerApplication
 		    Print("  run_project          Run the project in debug mode")
 		    Print("  stop_project         Stop the running debug session")
 		    Print("  save_project         Save the project to disk (File > Save)")
+		    Print("  set_declaration      Name a method/property and set its signature")
+		    Print("  delete_project_item  Delete a project item")
 		    Print("  create_project_item  Create a new class, method, property, etc.")
 		    Print("  run_ide_script       Execute an arbitrary IDE script")
 		    Print("  get_project_info     Get project path, Xojo version, and location")
@@ -240,7 +244,7 @@ Inherits MCPKit.ServerApplication
 	#tag EndMethod
 
 
-	#tag Constant, Name = kToolCount, Type = Double, Dynamic = False, Default = \"23", Scope = Private
+	#tag Constant, Name = kToolCount, Type = Double, Dynamic = False, Default = \"25", Scope = Private
 	#tag EndConstant
 
 	#tag Property, Flags = &h0, Description = 5061746820746F20586F6A6F20646F63756D656E746174696F6E206469726563746F72792E
