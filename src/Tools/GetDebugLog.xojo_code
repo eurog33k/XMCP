@@ -3,7 +3,7 @@ Protected Class GetDebugLog
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("get_debug_log", "Reads the XMCP debug log file at /tmp/xmcp_debug.log. This file is written by App.UnhandledException handlers in Xojo apps that use the XMCP debug pattern. Returns the file contents or an empty message if no log exists. Call this after a crash or unexpected app termination to retrieve exception details (message, error number, stack trace).")
+		  Super.Constructor("get_debug_log", "Reads the XMCP debug log file (/tmp/xmcp_debug.log on macOS and Linux, %TEMP%\xmcp_debug.log on Windows). This file is written by App.UnhandledException handlers in Xojo apps that use the XMCP debug pattern. Returns the file contents or an empty message if no log exists. Call this after a crash or unexpected app termination to retrieve exception details (message, error number, stack trace).")
 
 		  Parameters.Add(New MCPKit.ToolParameter("clear", MCPKit.ToolParameterTypes.Boolean_, _
 		  "If true, deletes the log file after reading it. Default is false.", _
@@ -19,9 +19,10 @@ Inherits MCPKit.Tool
 		    If arg.Name = "clear" Then clearLog = arg.Value.BooleanValue
 		  Next
 
-		  Var logFile As New FolderItem("/tmp/xmcp_debug.log")
-		  If Not logFile.Exists Then
-		    Return MCPKit.ToolResult.Success("No debug log found at /tmp/xmcp_debug.log. Make sure the app has an App.UnhandledException handler that writes to this path.")
+		  Var logFile As FolderItem = Platform.DebugLogFile
+		  Var logPath As String = Platform.DebugLogPath
+		  If logFile = Nil Or Not logFile.Exists Then
+		    Return MCPKit.ToolResult.Success("No debug log found at " + logPath + ". Make sure the app has an App.UnhandledException handler that writes to this path.")
 		  End If
 
 		  Var content As String
@@ -31,7 +32,7 @@ Inherits MCPKit.Tool
 		    content = stream.ReadAll
 		    stream.Close
 		  Catch e As IOException
-		    Return MCPKit.ToolResult.Failure("Failed to read /tmp/xmcp_debug.log: " + e.Message)
+		    Return MCPKit.ToolResult.Failure("Failed to read " + logPath + ": " + e.Message)
 		  End Try
 
 		  If clearLog Then

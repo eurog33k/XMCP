@@ -18,6 +18,7 @@ Inherits MCPKit.Tool
 
 	#tag Method, Flags = &h0
 		Function Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult
+		  #If TargetMacOS Then
 		  Var processName As String = ""
 		  Var seconds As Integer = 60
 		  For Each arg As MCPKit.ToolArgument In args
@@ -58,6 +59,17 @@ Inherits MCPKit.Tool
 		  End If
 
 		  Return MCPKit.ToolResult.Success(String.FromArray(result, Chr(10)))
+
+		  #Else
+		    // App.Configure only registers this tool on macOS, so this is just a backstop.
+		    // There is no equivalent of the unified log elsewhere: on Windows
+		    // System.DebugLog goes to OutputDebugString, which only an attached debugger
+		    // sees, and on Linux it goes to stderr.
+		    #Pragma Unused args
+		    Return MCPKit.ToolResult.Failure("get_system_log is only available on macOS, " + _
+		    "where it reads the unified log. Instead, have the app write to " + Platform.DebugLogPath + _
+		    " from an App.UnhandledException handler and read it with get_debug_log.")
+		  #EndIf
 
 		End Function
 	#tag EndMethod

@@ -14,9 +14,11 @@ Protected Module MCPKit
 		  error.Value("message") = errorMessage
 		  errorResponse.Value("error") = error
 		  
-		  Print(errorResponse.ToString)
-		  
-		  stdout.Flush
+		  // Not Print: it appends the platform EndOfLine (CRLF on Windows) and JSON-RPC
+		  // over stdio is LF delimited.
+		  StdOut.Write(errorResponse.ToString + Chr(10))
+
+		  StdOut.Flush
 		  
 		End Sub
 	#tag EndMethod

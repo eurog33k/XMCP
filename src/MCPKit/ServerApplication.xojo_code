@@ -27,10 +27,19 @@ Inherits ConsoleApplication
 		  
 		  While True
 		    Try
-		      // Read from stdin and ignore blank lines.
-		      Var inputLine As String = Input
-		      If StdIn.EndOfFile Then Exit  // stdin was closed - terminate gracefully.
-		      If inputLine = "" Then Continue
+		      // Read from stdin and ignore blank lines. Trim so that a CRLF terminated
+		      // line from a Windows client does not leave a stray CR on the JSON.
+		      Var inputLine As String = Input.Trim
+
+		      If inputLine = "" Then
+		        // Nothing to read right now. MCP clients launch us with stdin as a pipe,
+		        // and on a pipe `Input` returns immediately instead of blocking, so
+		        // without a pause this loop pegs a CPU core for the whole life of the
+		        // process - even while idle and working correctly.
+		        If StdIn.EndOfFile Then Exit  // stdin was closed - terminate gracefully.
+		        Thread.SleepCurrent(10)
+		        Continue
+		      End If
 		      
 		      If Verbose Then System.DebugLog(Name + " received: " + inputLine)
 		      
@@ -57,8 +66,11 @@ Inherits ConsoleApplication
 		      
 		      If response <> Nil Then
 		        // Send our response to stdout so the client can use it.
-		        Print(response.ToString)
-		        stdout.Flush
+		        // Deliberately not Print: that is StandardOutputStream.WriteLine, which
+		        // terminates with the platform EndOfLine - CRLF on Windows. JSON-RPC over
+		        // stdio is LF delimited, so write the terminator explicitly.
+		        StdOut.Write(response.ToString + Chr(10))
+		        StdOut.Flush
 		      End If
 		      
 		    Catch e As IOException

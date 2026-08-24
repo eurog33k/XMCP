@@ -4,6 +4,26 @@ All notable changes to XMCP will be documented here.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-24
+
+### Added
+- **Windows support.** All platform-dependent paths now live in a new `Platform` module: IPC socket discovery, the debug log location, and the documentation root. Verified on Windows 11 with Xojo 2026r1.1 — MCP handshake, tool listing, IDE connection, and documentation lookup all work
+- IPC socket discovery now mirrors `FindIPCPath` from Xojo's shipped IDECommunicator v2 example, probing candidate *folders* for writability instead of testing the socket path itself. On Windows the socket resolves to `%LOCALAPPDATA%\Temp\XojoIDE`
+- `XOJO_IPCPATH` is now honoured, so XMCP can talk to a specific IDE when several are running side by side
+- Connection failures now list every path that was tried and ask whether the IDE is running
+
+### Fixed
+- **`build_project` never actually built anything while always reporting success.** Its build-type table was wrong (`14` is iOS Device, not Windows 64-bit; `9` is macOS Universal, not Windows 32-bit) and `0` was not a valid target at all. It also used `DoCommand "BuildApp"`, which answers `{}` both on success and when the IDE ignores the command. Now uses the `BuildApp(type, reveal)` function, which returns the built path, so success is verifiable; an empty result is reported as a failure
+- **`revert_project` reported IDE script errors as success** and assumed the reload happened. It now verifies the project state through `ProjectShellPath` rather than trusting the reply, and reports the resolved project path
+- JSON-RPC responses are now terminated with an explicit LF. `Print` is `StandardOutputStream.WriteLine`, which emits the platform `EndOfLine` — CRLF on Windows — while the stdio transport is LF delimited. Incoming lines are trimmed so a CRLF-terminated request does not leave a stray CR on the JSON
+- Never probe the IPC socket path with `FolderItem.Exists`: on Windows the endpoint has no filesystem entry, so `Exists` is always `False` even while the IDE is listening. The check survives as a fast path on macOS and Linux only, and a bounded connect timeout rules out wrong candidates elsewhere
+- `get_project_info` returns long paths on Windows instead of the 8.3 short paths that `ProjectShellPath` hands back
+
+### Known limitations
+- `get_system_log` is macOS only and is no longer registered elsewhere (Windows exposes 21 tools instead of 22). `System.DebugLog` goes to `OutputDebugString` on Windows, which only an attached debugger sees — use a file-based `App.UnhandledException` handler with `get_debug_log`
+- `revert_project` does not work on Windows. Every reload route was tested: `CloseProject` + `OpenFile` reloads but quits the IDE when it closes the last project window; `DoCommand "Revert"` is undocumented, needs a pending change, and always raises a modal confirmation that blocks the IDE's script engine; re-opening the same project with `OpenFile` is a silent no-op. The tool fails explicitly without touching the IDE
+- Do not set `XOJO_AUTOMATION=TRUE` on Windows — the IDE exits immediately after loading a project
+
 ## [1.2.0] - 2026-02-24
 
 ### Added

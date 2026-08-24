@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-XMCP is an MCP (Model Context Protocol) server written in **Xojo** that gives AI assistants direct control over the Xojo IDE. It communicates via stdin/stdout JSON-RPC (MCP protocol) and forwards IDE commands via a Unix domain socket to the running Xojo IDE process.
+XMCP is an MCP (Model Context Protocol) server written in **Xojo** that gives AI assistants direct control over the Xojo IDE. It communicates via stdin/stdout JSON-RPC (MCP protocol) and forwards IDE commands over an `IPCSocket` to the running Xojo IDE process (a Unix domain socket on macOS and Linux, a named-pipe endpoint on Windows).
 
 ## Building
 
@@ -31,9 +31,9 @@ MCP Client (stdin/stdout JSON-RPC)
 
 ### Key Components
 
-**`App.xojo_code`** — Entry point. Registers all 22 tools in `Configure()`, auto-detects the Xojo documentation path under `~/Library/Application Support/Xojo/`, initializes `IDECommunicator`. The global `App.IDE` instance is used by all IDE tools.
+**`App.xojo_code`** — Entry point. Registers all tools in `Configure()` (22 on macOS, 21 elsewhere — `get_system_log` is macOS-only), auto-detects the Xojo documentation path under `SpecialFolder.ApplicationData/Xojo/Xojo/`, initializes `IDECommunicator`. The global `App.IDE` instance is used by all IDE tools.
 
-**`IDECommunicator.xojo_code`** — Handles all IDE socket communication. Uses IDE Communicator Protocol v2 over a Unix domain socket (`/tmp/XojoIDE` or `/private/tmp/XojoIDE`). Messages are NUL-terminated JSON. Sends a `{"protocol": 2}` handshake, then uses tag-based correlation for synchronous request/response. Default timeout is 10 seconds; builds use 120 seconds.
+**`IDECommunicator.xojo_code`** — Handles all IDE socket communication. Uses IDE Communicator Protocol v2 over an `IPCSocket`; candidate paths come from `Platform.IPCSocketPaths`. Messages are NUL-terminated JSON. Sends a `{"protocol": 2}` handshake, then uses tag-based correlation for synchronous request/response. Default timeout is 10 seconds; builds use 120 seconds.
 
 **`MCPKit/`** — The MCP protocol framework (8 classes):
 - `ServerApplication` — JSON-RPC stdin/stdout loop and tool dispatch
@@ -93,7 +93,7 @@ The IDE script language is the Xojo IDE Scripting language (not Xojo itself). Sc
 
 ## Development Notes
 
-- **macOS only** — socket paths, documentation paths, and the Xojo IDE are macOS-specific.
+- **macOS and Windows** — all platform-dependent paths live in `Platform.xojo_code`. Never probe the IPC socket path with `FolderItem.Exists`: on Windows the endpoint has no filesystem entry, so `Exists` is always `False` even while the IDE is listening. Probe the candidate *folder* for writability instead, mirroring `FindIPCPath` in Xojo's shipped IDECommunicator v2 example.
 - **Xojo IDE must be open** with a project loaded for IDE tools to work.
 - To test changes, rebuild with Xojo IDE, then restart the MCP client session.
 - Source files are `.xojo_code` (plain text, one class/module per file) and `.xojo_project` (XML project manifest). These can be edited as plain text or through the IDE.
@@ -110,7 +110,9 @@ Some items in a Xojo project cannot be accessed via the IDE scripting API. The w
 
 **Workflow:**
 1. Edit the `.xojo_code` or `.xojo_window` file directly as plain text
-2. Call `revert_project` (or `DoCommand "Revert"` in an IDE script) to reload the project
+2. Call `revert_project` to reload the project — **macOS/Linux only**. On Windows it returns a failure and changes nothing: `CloseProject(False)` + `OpenFile` is the only non-interactive way to reload, and on Windows closing the last project window quits the IDE. Ask the user to reload it themselves there.
+
+`DoCommand "Revert"` is not an automatable alternative on any platform. It does reload from disk, but only after a modal confirmation dialog that a human must click, and while that dialog is up the IDE's script engine is blocked — so every XMCP tool hangs until it is dismissed. It also requires the project to have a pending change; against a clean project the menu item does nothing.
 
 **File structure reference:**
 - `src/<ClassName>.xojo_code` — class, module, or app-level code
@@ -133,7 +135,7 @@ The file gives the AI immediate context about:
 
 ## App.UnhandledException pattern
 
-When building a Xojo app with XMCP, add this event to `App` to enable `get_debug_log` crash reporting. Note: only fires in built apps — the Xojo debugger intercepts exceptions during debug sessions.
+When building a Xojo app with XMCP, add this event to `App` to enable `get_debug_log` crash reporting. Note: only fires in built apps — the Xojo debugger intercepts exceptions during debug sessions. The path must match what `get_debug_log` reads: `/tmp/xmcp_debug.log` on macOS and Linux, `%TEMP%\xmcp_debug.log` on Windows. `SpecialFolder.Temporary` is deliberately not used on macOS, where it resolves to a per-process `/var/folders/.../T` path that XMCP would not find.
 
 ```xojo
 #tag Event
@@ -147,7 +149,11 @@ When building a Xojo app with XMCP, add this event to `App` to enable `get_debug
 	    Next
 	  End If
 
-	  Var f As New FolderItem("/tmp/xmcp_debug.log")
+	  #If TargetWindows Then
+	    Var f As FolderItem = SpecialFolder.Temporary.Child("xmcp_debug.log")
+	  #Else
+	    Var f As New FolderItem("/tmp/xmcp_debug.log")
+	  #EndIf
 	  Var stream As TextOutputStream = TextOutputStream.Open(f)
 	  stream.Write(msg)
 	  stream.Close

@@ -3,7 +3,7 @@ Protected Class IDECommunicator
 	#tag Method, Flags = &h0
 		Sub Constructor()
 		  mTagCounter = 0
-		  mSocketPath = FindIPCPath
+		  mSocketPath = ""  // No last-known-good path yet; discovered on first request.
 		  LastErrorMessage = ""
 		  mConnected = False
 		End Sub
@@ -11,11 +11,15 @@ Protected Class IDECommunicator
 
 	#tag Method, Flags = &h21
 		Private Function CandidateSocketPaths() As String()
+		  /// The last known good path first, then every path the IDE may be listening on
+		  /// for this platform. See Platform.IPCSocketPaths.
+
 		  Var paths() As String
 		  paths.Add(mSocketPath)
-		  paths.Add("/tmp/XojoIDE")
-		  paths.Add("/private/tmp/XojoIDE")
-		  
+		  For Each p As String In Platform.IPCSocketPaths
+		    paths.Add(p)
+		  Next p
+
 		  Var unique() As String
 		  For Each p As String In paths
 		    If p.Trim = "" Then Continue
@@ -36,20 +40,6 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
-	#tag Method, Flags = &h21
-		Private Function FindIPCPath() As String
-		  // Try standard locations for the IPC socket.
-		  Var paths() As String = Array("/tmp/XojoIDE", "/private/tmp/XojoIDE")
-
-		  For Each p As String In paths
-		    Var f As New FolderItem(p, FolderItem.PathModes.Native)
-		    If f <> Nil And f.Exists Then Return p
-		  Next
-
-		  Return "/tmp/XojoIDE"
-		End Function
-	#tag EndMethod
-
 	#tag Method, Flags = &h0
 		Function NextTag() As String
 		  /// Returns a unique tag string for each request to correlate requests with responses.
@@ -64,7 +54,7 @@ Protected Class IDECommunicator
 		Sub Reconnect()
 		  /// Reconnect to the Xojo IDE.
 
-		  mSocketPath = FindIPCPath
+		  mSocketPath = ""  // Forget the last known good path and rediscover.
 		  LastErrorMessage = ""
 		  mConnected = False
 
@@ -120,27 +110,36 @@ Protected Class IDECommunicator
 		      End If
 		    Next candidatePath
 
-		    // All paths failed. If the socket was simply not found (IDE temporarily
-		    // closed it after a navigation), wait briefly and retry.
-		    Var allNotFound As Boolean = True
+		    // All paths failed. If nothing was listening anywhere (the IDE temporarily
+		    // closes its socket after a navigation), wait briefly and retry. On macOS
+		    // that shows up as a missing socket file; on Windows, where there is no file
+		    // to miss, it shows up as a failed connect - kNoListenerPrefix covers both.
+		    Var allNoListener As Boolean = True
 		    For Each err As String In socketErrors
-		      If Not err.BeginsWith("IPC socket not found") Then
-		        allNotFound = False
+		      If Not err.BeginsWith(kNoListenerPrefix) Then
+		        allNoListener = False
 		        Exit
 		      End If
 		    Next err
 
-		    If attempt < kMaxRetries And (socketErrors.Count = 0 Or allNotFound) Then
+		    If attempt < kMaxRetries And (socketErrors.Count = 0 Or allNoListener) Then
 		      LogVerbose("IDE request " + tag + ": socket temporarily unavailable, retrying in " + kRetryPauseMS.ToString + "ms...")
-		      Var pauseDeadline As Double = System.Microseconds + (kRetryPauseMS * 1000.0)
-		      While System.Microseconds < pauseDeadline
-		        // Busy-wait to avoid blocking the event loop differently on console apps.
-		      Wend
+		      // Sleeping is safe here: this app has no Timers or socket event handlers,
+		      // and the IPCSocket below is driven by explicit Poll calls.
+		      Thread.SleepCurrent(kRetryPauseMS)
 		    Else
 		      If socketErrors.Count > 0 Then
 		        LastErrorMessage = String.FromArray(socketErrors, " | ")
 		      Else
-		        LastErrorMessage = "No IPCSocket response from Xojo IDE within " + timeoutMS.ToString + "ms."
+		        LastErrorMessage = "No IPCSocket response from Xojo IDE within " + timeoutMS.ToString + _
+		        "ms. Searched: " + Platform.SocketPathSummary
+		      End If
+
+		      If allNoListener Then
+		        // Nothing was listening on any candidate path. By far the most common cause
+		        // is simply that the IDE is not running, and the raw timeout text does not
+		        // suggest that - so say it.
+		        LastErrorMessage = LastErrorMessage + " Is the Xojo IDE running with a project open?"
 		      End If
 		      Exit While
 		    End If
@@ -166,33 +165,49 @@ Protected Class IDECommunicator
 		Private Function SendAndReceiveViaIPCSocket(candidatePath As String, payload As String, tag As String, timeoutMS As Integer) As JSONItem
 		  LastErrorMessage = ""
 		  
-		  Var socketFile As New FolderItem(candidatePath, FolderItem.PathModes.Native)
-		  If socketFile = Nil Or Not socketFile.Exists Then
-		    LastErrorMessage = "IPC socket not found at: " + candidatePath
-		    Return Nil
-		  End If
-		  
+		  #If Not TargetWindows Then
+		    // A Unix domain socket is a real filesystem entry, so a missing file means the
+		    // IDE is definitely not listening here and we can skip the connect entirely.
+		    // Never do this on Windows: an IPCSocket endpoint there has no filesystem
+		    // entry at all, so Exists is always False even while the IDE is listening.
+		    Var socketFile As New FolderItem(candidatePath, FolderItem.PathModes.Native)
+		    If socketFile = Nil Or Not socketFile.Exists Then
+		      LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + " (no socket file)."
+		      Return Nil
+		    End If
+		  #EndIf
+
 		  Var deadlineUS As Double = System.Microseconds + (timeoutMS * 1000.0)
 		  Var sock As New IPCSocket
 		  sock.Path = candidatePath
-		  
+
 		  Try
 		    sock.Connect
 		  Catch e As RuntimeException
-		    LastErrorMessage = "IPCSocket connect failed for " + candidatePath + ": " + e.Message
+		    LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + ": " + e.Message
 		    Return Nil
 		  End Try
-		  
-		  While Not sock.IsConnected And System.Microseconds < deadlineUS
+
+		  // Bound the connect wait separately from the response wait. Without a real
+		  // socket file to pre-check, a wrong candidate can only be ruled out by a failed
+		  // connect, and a build request would otherwise sit here for its full 120s
+		  // timeout on every candidate before reaching the one the IDE is listening on.
+		  Var connectTimeoutMS As Integer = timeoutMS
+		  If connectTimeoutMS > kConnectTimeoutMS Then connectTimeoutMS = kConnectTimeoutMS
+		  Var connectDeadlineUS As Double = System.Microseconds + (connectTimeoutMS * 1000.0)
+
+		  While Not sock.IsConnected And System.Microseconds < connectDeadlineUS
 		    sock.Poll
+		    Thread.SleepCurrent(1)  // 1ms between polls; without this we spin a core until connected.
 		  Wend
-		  
+
 		  If Not sock.IsConnected Then
 		    sock.Close
-		    LastErrorMessage = "IPCSocket connect timeout for " + candidatePath + " within " + timeoutMS.ToString + "ms."
+		    LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + _
+		    " (connect timed out after " + connectTimeoutMS.ToString + "ms)."
 		    Return Nil
 		  End If
-		  
+
 		  Try
 		    sock.Write(payload)
 		    sock.Flush
@@ -209,7 +224,12 @@ Protected Class IDECommunicator
 		    sock.Poll
 		    
 		    Var chunk As String = sock.ReadAll
-		    If chunk = "" Then Continue
+		    If chunk = "" Then
+		      // Same trap as the stdin loop in ServerApplication: an empty read plus a bare
+		      // Continue spins a core for the whole time we wait for the IDE to answer.
+		      Thread.SleepCurrent(1)
+		      Continue
+		    End If
 		    
 		    hadData = True
 		    buffer = buffer + chunk
@@ -246,6 +266,12 @@ Protected Class IDECommunicator
 		  Return Nil
 		End Function
 	#tag EndMethod
+
+	#tag Constant, Name = kConnectTimeoutMS, Type = Double, Dynamic = False, Default = \"1500", Scope = Private
+	#tag EndConstant
+
+	#tag Constant, Name = kNoListenerPrefix, Type = String, Dynamic = False, Default = \"No IDE listener", Scope = Private
+	#tag EndConstant
 
 	#tag Property, Flags = &h0
 		LastErrorMessage As String

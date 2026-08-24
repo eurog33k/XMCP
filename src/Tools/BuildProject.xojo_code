@@ -5,8 +5,13 @@ Inherits MCPKit.Tool
 		Sub Constructor()
 		  Super.Constructor("build_project", "Builds the current Xojo project. Returns the path to the built application on success, or build errors on failure.")
 
+		  // Values per IDE Scripting > Building commands > BuildApp. Getting these wrong
+		  // is silent: an unavailable target simply does not build.
 		  Parameters.Add(New MCPKit.ToolParameter("build_type", MCPKit.ToolParameterTypes.Integer_, _
-		  "Build type: 0=Default, 5=macOS (Cocoa), 9=Windows 32-bit, 14=Windows 64-bit, 16=Linux 32-bit, 17=Linux 64-bit, 18=Linux ARM, 24=macOS Universal. Default is 0.", _
+		  "Build target: 3=Windows 32-bit, 19=Windows 64-bit Intel, 25=Windows 64-bit ARM, " + _
+		  "9=macOS Universal, 16=macOS 64-bit Intel, 24=macOS 64-bit ARM, " + _
+		  "17=Linux 64-bit Intel, 18=Linux 32-bit ARM, 26=Linux 64-bit ARM, 4=Linux 32-bit Intel. " + _
+		  "Omit to build for the platform XMCP is running on. The target must be enabled in Build Settings.", _
 		  True, 0, False))
 
 		  Parameters.Add(New MCPKit.ToolParameter("reveal", MCPKit.ToolParameterTypes.Boolean_, _
@@ -28,13 +33,26 @@ Inherits MCPKit.Tool
 		    End If
 		  Next arg
 
-		  // DoCommand "BuildApp" returns a buildError JSON object on failure,
-		  // or {} on success. The IDE returns it directly as the response value —
-		  // not via Print — so we just call DoCommand and let the response come back.
+		  // 0 is not a valid IDE build type, so it means "not specified": resolve it to the
+		  // target for the platform XMCP - and therefore the IDE - is running on.
+		  If buildType = 0 Then
+		    #If TargetMacOS Then
+		      buildType = 9   // macOS Universal
+		    #ElseIf TargetWindows Then
+		      buildType = 19  // Windows 64-bit Intel
+		    #Else
+		      buildType = 17  // Linux 64-bit Intel
+		    #EndIf
+		  End If
+
+		  // BuildApp(type, reveal) is a function that returns the shell path of the built
+		  // app, so success is verifiable. DoCommand "BuildApp ..." is deliberately not
+		  // used: it answers {} both when the build succeeded and when the IDE ignored the
+		  // command (an invalid or disabled target), which reads as a false success.
+		  // A build error still arrives as a buildError object in the response value.
 		  Var revealStr As String = If(reveal, "True", "False")
 		  Var script As String = _
-		  "DoCommand ""BuildApp " + buildType.ToString + " " + revealStr + """" + EndOfLine + _
-		  "Print """""
+		  "Print BuildApp(" + buildType.ToString + ", " + revealStr + ")"
 
 		  // Builds can take a long time — use a 120 second timeout.
 		  If App.IDE = Nil Then
@@ -52,20 +70,26 @@ Inherits MCPKit.Tool
 		  If response.HasKey("response") Then
 		    Var resp As Variant = response.Value("response")
 
-		    // DoCommand returns a JSON string we printed — parse it.
 		    If resp.Type = Variant.TypeString Then
-		      Var respStr As String = resp.StringValue
+		      Var respStr As String = resp.StringValue.Trim
+		      If respStr = "" Then
+		        // BuildApp returned no path: the IDE accepted the script but built nothing.
+		        Return MCPKit.ToolResult.Failure("The IDE returned no build path, so nothing " + _
+		        "was built. Build type " + buildType.ToString + " is most likely not a valid " + _
+		        "target for this project, or is not enabled in Build Settings. See the " + _
+		        "build_type parameter for the valid values.")
+		      End If
 		      Try
 		        Var resultJSON As New JSONItem(respStr)
-		        Return ParseDoCommandResult(resultJSON)
+		        Return ParseBuildResult(resultJSON)
 		      Catch e As JSONException
-		        // Not JSON — treat as a plain success message.
+		        // Not JSON, so it is the path to the built app.
 		        Return MCPKit.ToolResult.Success("Build succeeded: " + respStr)
 		      End Try
 		    Else
-		      // Already a JSON object in the response envelope.
+		      // A build error arrives as a JSON object in the response envelope.
 		      Var respJSON As JSONItem = response.Value("response")
-		      Return ParseDoCommandResult(respJSON)
+		      Return ParseBuildResult(respJSON)
 		    End If
 		  End If
 
@@ -75,13 +99,13 @@ Inherits MCPKit.Tool
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
-		Private Function ParseDoCommandResult(resultJSON As JSONItem) As MCPKit.ToolResult
-		  /// Parses the JSON returned by DoCommand "BuildApp".
-		  /// Success: empty {} → "Build succeeded."
+		Private Function ParseBuildResult(resultJSON As JSONItem) As MCPKit.ToolResult
+		  /// Parses a JSON object returned in place of a build path.
 		  /// Failure: {"buildError": {"errors": [...]}} → formatted error list.
 
 		  If resultJSON.Count = 0 Then
-		    Return MCPKit.ToolResult.Success("Build succeeded.")
+		    Return MCPKit.ToolResult.Failure("The IDE returned an empty result, so nothing was " + _
+		    "built. Check that the requested build type is a valid, enabled target for this project.")
 		  End If
 
 		  If resultJSON.HasKey("buildError") Then

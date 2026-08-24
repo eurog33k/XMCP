@@ -12,7 +12,7 @@ Inherits MCPKit.ServerApplication
 		    If Verbose Then System.DebugLog("IDE communicator initialized.")
 		  Catch e As RuntimeException
 		    System.DebugLog("WARNING: Could not connect to Xojo IDE: " + e.Message)
-		    System.DebugLog("Make sure the Xojo IDE is running and the IPC socket is available at /tmp/XojoIDE or /private/tmp/XojoIDE.")
+		    System.DebugLog("Make sure the Xojo IDE is running. Looked for its IPC socket at: " + Platform.SocketPathSummary)
 		    IDE = Nil
 		  End Try
 		  
@@ -26,7 +26,7 @@ Inherits MCPKit.ServerApplication
 		      DocsPath = Nil
 		    End If
 		  Else
-		    // Auto-detect: scan ~/Library/Application Support/Xojo/Xojo/ for newest version.
+		    // Auto-detect: scan the Xojo application data folder for the newest version.
 		    DocsPath = DetectDocsPath
 		  End If
 		  
@@ -58,11 +58,17 @@ Inherits MCPKit.ServerApplication
 		  New ListDocTopics, _
 		  New RevertProject, _
 		  New EstimateRequestCost, _
-		  New GetDebugLog, _
-		  New GetSystemLog _
+		  New GetDebugLog _
 		  )
 
-		  If Verbose Then System.DebugLog("XMCP server configured with 22 tools.")
+		  // get_system_log reads the macOS unified log; there is no equivalent elsewhere,
+		  // so it is not advertised on other platforms. RegisterTools appends, so this
+		  // simply adds to the list above.
+		  #If TargetMacOS Then
+		    RegisterTools(New GetSystemLog)
+		  #EndIf
+
+		  If Verbose Then System.DebugLog("XMCP server configured with " + mTools.Count.ToString + " tools.")
 		  
 		End Sub
 	#tag EndEvent
@@ -72,7 +78,13 @@ Inherits MCPKit.ServerApplication
 		  If CommandLineParser.HelpRequested Then
 		    CommandLineParser.ShowHelp("Options")
 		    Print("")
-		    Print("MCP Tools (22):")
+		    // A literal, not mTools.Count: DidParseOptions runs before Configure, so no
+		    // tools are registered yet at this point.
+		    #If TargetMacOS Then
+		      Print("MCP Tools (22):")
+		    #Else
+		      Print("MCP Tools (21):")
+		    #EndIf
 		    Print("")
 		    Print("  IDE Tools:")
 		    Print("  list_project_items   List child items at a project location")
@@ -101,13 +113,20 @@ Inherits MCPKit.ServerApplication
 		    Print("  estimate_request_cost Estimate likely token cost and alternatives")
 		    Print("")
 		    Print("  Debug Tools:")
-		    Print("  get_debug_log        Read crash/exception log from /tmp/xmcp_debug.log")
-		    Print("  get_system_log       Read System.DebugLog output from macOS unified log")
+		    Print("  get_debug_log        Read crash/exception log from " + Platform.DebugLogPath)
+		    #If TargetMacOS Then
+		      Print("  get_system_log       Read System.DebugLog output from macOS unified log")
+		    #EndIf
 		    Print("")
 		    Print("Usage:")
 		    Print("  The XMCP server communicates via JSON-RPC over stdin/stdout (MCP protocol).")
-		    Print("  It connects to the Xojo IDE via the IPC socket at /tmp/XojoIDE (or /private/tmp/XojoIDE).")
-		    Print("  Documentation is auto-detected from ~/Library/Application Support/Xojo/")
+		    Print("  It connects to the Xojo IDE via an IPC socket. Candidate paths on this")
+		    Print("  platform: " + Platform.SocketPathSummary)
+		    #If TargetWindows Then
+		      Print("  Documentation is auto-detected from %APPDATA%\Xojo\Xojo")
+		    #Else
+		      Print("  Documentation is auto-detected from ~/Library/Application Support/Xojo/")
+		    #EndIf
 		    Print("  or can be specified with --docs-path.")
 		    Print("")
 		    Print("  Make sure the Xojo IDE is running before starting this server.")
@@ -116,7 +135,11 @@ Inherits MCPKit.ServerApplication
 		    Print("  {")
 		    Print("    ""mcpServers"": {")
 		    Print("      ""xmcp"": {")
-		    Print("        ""command"": ""/path/to/XMCP""")
+		    #If TargetWindows Then
+		      Print("        ""command"": ""C:\\path\\to\\XMCP.exe""")
+		    #Else
+		      Print("        ""command"": ""/path/to/XMCP""")
+		    #EndIf
 		    Print("      }")
 		    Print("    }")
 		    Print("  }")
@@ -165,7 +188,9 @@ Inherits MCPKit.ServerApplication
 
 	#tag Method, Flags = &h21
 		Private Function DetectDocsPath() As FolderItem
-		  // Look for Xojo docs at ~/Library/Application Support/Xojo/Xojo/<version>/Documentation/
+		  // Look for Xojo docs under SpecialFolder.ApplicationData:
+		  //   macOS:   ~/Library/Application Support/Xojo/Xojo/<version>/Documentation/
+		  //   Windows: %APPDATA%\Xojo\Xojo\<version>\Documentation\
 		  Var appSupport As FolderItem = SpecialFolder.ApplicationData
 		  If appSupport = Nil Then Return Nil
 		  

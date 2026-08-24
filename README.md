@@ -2,21 +2,24 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants direct control over the [Xojo IDE](https://www.xojo.com). Built in Xojo using [MCPKit](https://github.com/gkjpettet/MCPKit) by Garry Pettet.
 
-XMCP connects to the Xojo IDE via its IPC socket and exposes 22 tools that let an AI navigate projects, read and write code, build and run applications, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
+XMCP connects to the Xojo IDE via its IPC socket and exposes 22 tools (21 on Windows, where `get_system_log` has no equivalent) that let an AI navigate projects, read and write code, build and run applications, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
 
 XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP resource. Compatible clients (e.g. Claude Code) fetch it automatically at session start, giving the AI immediate awareness of XMCP's capabilities, known IDE scripting limitations, and fallback strategies — without any extra configuration. You can edit the file to add project-specific notes without rebuilding.
 
 ## Requirements
 
-- **Xojo IDE** available for IDE tools (socket at `/tmp/XojoIDE` or `/private/tmp/XojoIDE`)
-- **macOS** (current implementation targets macOS paths for IDE socket discovery and documentation auto-detection)
+- **Xojo IDE** available for IDE tools (its IPC socket path is discovered automatically; see [IDE Communication](#ide-communication))
+- **macOS or Windows** - both are supported. On Windows the socket resolves to `%LOCALAPPDATA%\Temp\XojoIDE` and `get_system_log` is unavailable (see [Known Limitations](#known-limitations)); Linux is untested
 - **Xojo documentation** (optional) - install via **Xojo IDE → Preferences → General → Install Local Documentation**, then auto-detected by XMCP
 
 ## Installation
 
 1. Open `src/XMCP.xojo_project` in the Xojo IDE
-2. Build the project (Build > Build)
-3. Note the path to the built `XMCP` binary
+2. Enable the target you want under **Build Settings** (macOS and/or Windows), then build (Build > Build)
+3. Note the path to the built binary — `XMCP` on macOS, `XMCP.exe` on Windows
+4. Copy `src/usage-guide.md` next to the binary so XMCP can serve it as an MCP resource
+
+**On Windows**, a Xojo console build produces `XMCP.exe` alongside `XojoConsoleFramework64.dll`, the MSVC redistributable DLLs, and an `XMCP Libs` folder of plugin DLLs (`RegExx64.dll` and friends). Keep the whole folder together and point your MCP client at the `.exe` in place — moving the `.exe` on its own will leave it unable to start.
 
 ### Configure your MCP client
 
@@ -39,6 +42,18 @@ XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP re
   "mcpServers": {
     "xmcp": {
       "command": "/path/to/XMCP"
+    }
+  }
+}
+```
+
+**On Windows**, use the full path to the `.exe` and escape the backslashes:
+
+```json
+{
+  "mcpServers": {
+    "xmcp": {
+      "command": "C:\\Users\\you\\XMCP\\XMCP.exe"
     }
   }
 }
@@ -246,7 +261,7 @@ These tools help diagnose runtime errors in Xojo apps by reading exception logs 
 
 #### `get_debug_log`
 
-Reads crash and exception info from `/tmp/xmcp_debug.log`. This file is written by `App.UnhandledException` handlers in Xojo apps that use the XMCP debug pattern. Call this after a crash or unexpected termination to retrieve exception details.
+Reads crash and exception info from `/tmp/xmcp_debug.log` (macOS and Linux) or `%TEMP%\xmcp_debug.log` (Windows). This file is written by `App.UnhandledException` handlers in Xojo apps that use the XMCP debug pattern — see `usage-guide.md` for a handler that picks the right path per platform. Call this after a crash or unexpected termination to retrieve exception details.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -254,7 +269,7 @@ Reads crash and exception info from `/tmp/xmcp_debug.log`. This file is written 
 
 #### `get_system_log`
 
-Reads recent `System.DebugLog` output from the macOS unified log. Works for both debug builds (`AppName.debug`) and built apps (`AppName`).
+**macOS only** — not registered on other platforms. Reads recent `System.DebugLog` output from the macOS unified log. Works for both debug builds (`AppName.debug`) and built apps (`AppName`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -307,7 +322,7 @@ XMCP
 
 ### IDE Communication
 
-XMCP connects to the Xojo IDE via a Unix domain socket (`IPCSocket`) at `/tmp/XojoIDE` (fallback: `/private/tmp/XojoIDE`). It uses the **IDE Communicator Protocol v2**, where messages are NUL-terminated JSON objects:
+XMCP connects to the Xojo IDE via an `IPCSocket` - a Unix domain socket on macOS and Linux, a named-pipe endpoint on Windows. It uses the **IDE Communicator Protocol v2**, where messages are NUL-terminated JSON objects:
 
 1. On connect, sends `{"protocol": 2}` to upgrade to protocol v2
 2. Requests are sent as `{"tag": "xmcp_1", "script": "Print Location"}`
@@ -316,15 +331,34 @@ XMCP connects to the Xojo IDE via a Unix domain socket (`IPCSocket`) at `/tmp/Xo
 
 The `IDECommunicator` class handles connection management, tag generation, synchronous send/receive with configurable timeouts, and NUL-terminated message framing using direct `IPCSocket` communication.
 
-For each IDE request, XMCP tries the last successful socket path first, then `/tmp/XojoIDE` and `/private/tmp/XojoIDE`. If all attempts fail, the tool returns a detailed connection/timeout error.
+For each IDE request, XMCP tries the last successful socket path first, then every candidate path for the platform. Candidates are derived by `Platform.IPCSocketPaths`, which mirrors `FindIPCPath` in Xojo's shipped IDECommunicator v2 example - the reference implementation of the IDE's own path resolution. It probes each candidate *folder* for writability, in the IDE's own order:
+
+| Rung | macOS / Linux | Windows |
+|------|---------------|---------|
+| 1 | `/tmp` | `C:\tmp` (rarely exists) |
+| 2 | `/var/tmp` | `C:\var\tmp` (rarely exists) |
+| 3 | `SpecialFolder.Temporary` | `%LOCALAPPDATA%\Temp` <- **in practice, this one** |
+| 4 | `SpecialFolder.Home` | `%USERPROFILE%` (follows OneDrive when active) |
+
+The socket file name is `XojoIDE`, or the value of the `XOJO_IPCPATH` environment variable when set - which is how you address one specific IDE when several are running.
+
+Two platform differences matter:
+
+- **Windows endpoints have no filesystem entry.** `FolderItem.Exists` on the socket path is always `False` there, even while the IDE is listening, so it must never gate the connect. XMCP keeps the existence check as a fast path on macOS and Linux only, and on Windows rules a candidate out with a short (1.5 s) connect timeout instead.
+- **The path is per-user.** `%LOCALAPPDATA%` differs between accounts, so XMCP must run as the same Windows user as the IDE. When no listener is found, the error message lists every path that was tried.
+
+If all attempts fail, the tool returns a detailed connection/timeout error.
 
 ### Documentation Auto-Detection
 
-On startup, XMCP scans `~/Library/Application Support/Xojo/Xojo/` for the newest Xojo version directory that contains `Documentation/llms-full.txt`. This file (along with `llms.txt` and `_sources/*.rst.txt`) is available via **Xojo IDE → Preferences → General → Install Local Documentation** and is intended specifically for LLM consumption.
+On startup, XMCP scans `SpecialFolder.ApplicationData/Xojo/Xojo/` - `~/Library/Application Support/Xojo/Xojo/` on macOS, `%APPDATA%\Xojo\Xojo\` on Windows - for the newest Xojo version directory that contains `Documentation/llms-full.txt`. This file (along with `llms.txt` and `_sources/*.rst.txt`) is available via **Xojo IDE → Preferences → General → Install Local Documentation** and is intended specifically for LLM consumption.
 
 ## Known Limitations
 
-- **macOS only** — depends on Unix domain sockets and macOS-specific Xojo docs location conventions.
+- **`get_system_log` is macOS-only** — it reads the macOS unified log, which has no equivalent elsewhere. On Windows `System.DebugLog` goes to `OutputDebugString`, visible only to an attached debugger, so the tool is not registered there and XMCP exposes 21 tools instead of 22. Use a file-based `App.UnhandledException` handler with `get_debug_log` instead.
+- **`revert_project` does not work on Windows** — the only non-interactive reload available through IDE scripting is `CloseProject(False)` + `OpenFile`, and on Windows closing the last project window quits the IDE, taking the IPC socket with it. `DoCommand "Revert"` is not a substitute: it reloads only after a modal confirmation dialog that a human must click, and blocks the IDE's script engine until then. Re-opening the same project with `OpenFile` reloads nothing. So on Windows the tool returns an explicit failure without touching the IDE — reload with File > Revert to Saved, or by closing and reopening the project. The direct file editing workflow is otherwise unaffected.
+- **Do not set `XOJO_AUTOMATION=TRUE` on Windows** — Xojo documents this variable for build automation (it skips the Feedback Crash and Restore Previous Project dialogs), but on Windows the IDE exits immediately after loading a project when it is set. Verified 2026-08-24 with Xojo 2026r1.1: the same `Start-Process` launch keeps the project open with the variable unset or `FALSE`, and shuts the IDE down with it set to `TRUE`. XMCP then reports `No IDE listener` for every tool, because there is no IDE left to talk to.
+- **Linux is untested** — the path resolution in `Platform.xojo_code` covers it, but nothing has been verified on Linux.
 - **IDE tools require an open project** — the Xojo IDE scripting socket must be available and a project must be loaded.
 - **Documentation tools require local docs** — depend on `llms-full.txt`, `llms.txt`, and `_sources/*.rst.txt` files shipped with the Xojo IDE.
 - **`get_code`, `set_code`, `get_selected_text`, `set_selected_text` require a method or property to be active** — these tools operate on the code editor view. If the selected item in the Navigator is a class, module, or folder (not a method, property, or other code item), they return an error: `No code editor is active. Navigate to a method or property first.`

@@ -53,7 +53,11 @@ Inherits MCPKit.Tool
 		    If projectPath <> "" Then
 		      Var projectFile As New FolderItem(projectPath, FolderItem.PathModes.Shell)
 		      If projectFile <> Nil And projectFile.Parent <> Nil Then
-		        text = text + Chr(10) + "Project Directory: " + projectFile.Parent.ShellPath
+		        // NativePath, not ShellPath: on Windows ShellPath is the 8.3 short path for
+		        // items that exist, which is unreadable and not what callers want to see.
+		        // ProjectShellPath gave us that short form, so restate it as a long path too.
+		        text = text.Replace("Project: " + projectPath, "Project: " + projectFile.NativePath)
+		        text = text + Chr(10) + "Project Directory: " + projectFile.Parent.NativePath
 		      End If
 		    End If
 
