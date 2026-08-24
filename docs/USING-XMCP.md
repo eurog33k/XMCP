@@ -104,7 +104,7 @@ in a script and discards the rest, so print once, at the point whose value you w
 | `list_project_items` on a class returns `{}` | it lists contained *items*, not a class's members | navigate to members by name; you don't need to enumerate them first |
 | `get_code` says *"No code editor is active"* | the current location isn't a code item (a class or folder is selected) | pass an explicit `location` to `get_code` instead of relying on the current selection |
 | Window event handlers are invisible | they live in `.xojo_window`, which IDE scripting doesn't expose | edit the file on disk, then `revert_project` — see [section 5](#5-editing-safely) |
-| `set_code` leaves a trailing blank line | quirk of writing through the code editor | harmless; ignore it |
+| `set_code` leaves a trailing blank line, and the IDE re-indents the body | code goes through the code editor, which normalises it | harmless; do not expect a byte-identical round-trip |
 | An overloaded method reads back one version | paths carry no signature, so the IDE resolves the name to one of them | read the `.xojo_code` file on disk when you need to see every overload |
 | Two tool calls at once fail | the IDE accepts one IPC connection at a time | keep calls sequential |
 | A call right after navigation times out | the IDE briefly closes its socket after some navigation | XMCP retries automatically; if one still fails, just retry |
@@ -192,7 +192,7 @@ Linux, so write to a log file there instead.
 | Documentation | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_system_log` | available | **not available** — `System.DebugLog` goes to `OutputDebugString`, which only an attached debugger sees |
 | `revert_project` | closes and reopens the project | same, but first opens an empty project to hold the IDE up — skipped if you already have another project open |
-| `delete_project_item` | works | **not available** — `DoCommand "DeleteSelection"` is not implemented on Windows |
+| `delete_project_item` | items and members | **items only** — members must be removed from the `.xojo_code` file on disk |
 
 Everything else behaves identically. Two Windows-specific rules:
 

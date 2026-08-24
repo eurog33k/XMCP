@@ -14,7 +14,7 @@ XMCP gives you direct control over the Xojo IDE via 25 tools (24 on Windows — 
 - **Save**: `save_project` — writes the IDE's in-memory project to disk. Call this after `set_code`, `create_project_item`, `constant_value` or `get_item_description` so your changes reach disk
 - **Create items**: `create_project_item`
 - **Inspect and modify**: `get_item_description`, `constant_value`, `get_project_info`, `revert_project`
-- **Create a usable method**: `create_project_item` makes an unnamed `Untitled` item, then `set_declaration` gives it a name, parameters, return type and scope, then `set_code` fills in the body. All three are needed - `set_code` writes bodies only, so passing a `Function ...` signature line as code just writes it as text. `delete_project_item` removes an item if you created the wrong thing
+- **Create a usable method**: `create_project_item` makes an unnamed `Untitled` item, then `set_declaration` gives it a name, parameters, return type and scope, then `set_code` fills in the body. The IDE re-indents whatever `set_code` writes, so a body read back after a save is normalised to IDE style rather than byte-identical to what you sent. All three are needed - `set_code` writes bodies only, so passing a `Function ...` signature line as code just writes it as text. `delete_project_item` removes an item if you created the wrong thing
 - **IDE scripting**: `run_ide_script` (escape hatch for anything not covered)
 - **Documentation**: `search_docs`, `lookup_class`, `list_doc_topics`
 - **Debugging**: `get_debug_log`, `get_system_log` (macOS only)
@@ -71,6 +71,15 @@ Print "after: " + Location           ' <- discarded, though it ran fine
 
 **Solution**: print once, at the point whose value you want. To confirm an effect, make a second `run_ide_script` call. Also note that a command with no value to give - `PropertyValue` on an item it does not support - yields an empty result, which is not a failure either.
 
+**IDE script is XojoScript, not Xojo** - a smaller language than the one you are writing for. Two that bite:
+
+| Fails | Use instead |
+|---|---|
+| `Str(aBoolean)` - *expects type Double* | `aBoolean.ToString` |
+| `Catch e As RuntimeException` - *class RuntimeException is not available* | a bare `Catch` |
+
+Commands that answer nothing at all, so verify in a second call rather than printing after them: `CloseProject`, `DoCommand("Delete")`, `DoCommand("DeleteSelection")`, `DoCommand("Revert")`, `ChangeDeclaration`.
+
 ### 5. IPC socket timing after navigation
 
 After certain navigation operations, the Xojo IDE briefly closes its IPC socket (~2–3 seconds). XMCP retries automatically (up to 5 × 1 second), so most calls recover. If a tool times out immediately after navigation, retry once.
@@ -87,7 +96,7 @@ XMCP runs on macOS and Windows. What changes:
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | `get_system_log` | available | **not registered** — no unified-log equivalent |
 | `revert_project` | works | works — opens an empty project first if yours is the only window |
-| `delete_project_item` | works | **does not work** — the IDE command is not implemented there; ask the user to delete in the IDE |
+| `delete_project_item` | works for items and members | works for **items only** — members must go via disk (delete the `#tag Method` block, then `revert_project`) |
 | Docs location | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_project_info` paths | POSIX paths | long paths (XMCP converts the IDE's 8.3 short paths back) |
 

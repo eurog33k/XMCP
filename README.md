@@ -196,9 +196,11 @@ Sets a method or property declaration — name, parameters, return type, scope, 
 
 #### `delete_project_item`
 
-**macOS only.** Deletes a project item — method, property, constant, class, module or folder. Requires an explicit `item_path` and never acts on the current selection. Deleting a container deletes its contents. Reversible with `revert_project` until the project is saved.
+Deletes a project item. Requires an explicit `item_path` and never acts on the current selection. Deleting a container deletes its contents. Reversible with `revert_project` until the project is saved.
 
-On Windows the underlying `DoCommand "DeleteSelection"` is documented as not implemented and does nothing, so the tool reports failure and changes nothing — delete the item in the IDE instead. It is still attempted rather than refused outright, so it will start working on its own if a future Xojo implements it.
+Two mechanisms, because the IDE has two independent selections. For a **top-level item** (class, module, folder) the tool selects it in the Navigator and issues `DoCommand("Delete")` — works on macOS and Windows. For a **member** (a method, property or constant inside a class or module) `SelectProjectItem` cannot reach it and the Navigator stays on the *parent*, so `Delete` is never fired there; the tool points the editor at the member and uses `DoCommand("DeleteSelection")`, which works on macOS only. On Windows it refuses and names the disk route instead.
+
+Before deleting an item the tool checks that `ProjectItem` — the IDE's Navigator selection — is the item you asked for, so a mismatch refuses rather than deleting the wrong thing.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
