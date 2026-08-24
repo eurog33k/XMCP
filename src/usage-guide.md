@@ -96,7 +96,7 @@ Consequences when writing code for the user:
 - On Windows you cannot read `System.DebugLog` output at all. If the user needs runtime diagnostics there, write to a log file from the app instead of calling `System.DebugLog`.
 - XMCP must run as the same OS user as the Xojo IDE on Windows, because the socket path is under that user's profile. A "No IDE listener" error lists every path that was tried.
 - If every tool fails with "No IDE listener" on Windows and the IDE seems to close by itself, check for `XOJO_AUTOMATION=TRUE` in the environment: on Windows the IDE exits right after loading a project when that is set. Tell the user to unset it and relaunch the IDE.
-- **`revert_project` works on Windows, with a visible side effect.** Reloading needs the project closed and reopened, and closing the last project window quits the Xojo IDE - so XMCP briefly opens a generated throwaway project to hold the IDE open, then closes it again. The user may see a second project window appear and disappear. If it fails partway it says so and names the path to reopen; it never leaves the IDE dead.
+- **`revert_project` works on Windows, sometimes with a visible side effect.** Reloading needs the project closed and reopened, and closing the last project window quits the Xojo IDE - so if the project is the only window open, XMCP creates an empty unsaved project to hold the IDE up and discards it afterwards. The user may see a window appear and disappear. If another project is already open, nothing extra is created. If it fails partway it says so and names the path to reopen; it never leaves the IDE dead.
 
 ---
 

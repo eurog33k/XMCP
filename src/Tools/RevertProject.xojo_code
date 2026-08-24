@@ -32,16 +32,15 @@ Inherits MCPKit.Tool
 		  End If
 
 		  #If TargetWindows Then
-		    // Windows quits the IDE when its last project window closes, so the project
-		    // cannot simply be closed and reopened. Holding a throwaway "host" project open
-		    // keeps the IDE - and the IPC socket - alive across the close, and also keeps
-		    // CloseProject from tearing down the running script. CloseProject acts on the
-		    // frontmost workspace window, and OpenFile on an already-open project focuses it
-		    // without reloading, which is what makes the order below controllable.
+		    // Windows quits the IDE when its last project window closes, so the target cannot
+		    // simply be closed and reopened. A second open workspace window prevents that, and
+		    // also keeps CloseProject from tearing down the running script.
 		    //
-		    // Every step is verified against ProjectShellPath rather than trusting replies.
+		    // CloseProject acts on the frontmost workspace window, and OpenFile on an
+		    // already-open project focuses it without reloading - that is what makes the
+		    // ordering below controllable. Every step is measured, not assumed.
 
-		    // 1. Where is the target, and which IDE version are we talking to?
+		    // 1. Where is the target?
 		    Var reachable As Boolean
 		    Var targetShell As String = ProjectPathFromIDE(reachable)
 		    If Not reachable Then Return IDEFailure("reading the project path")
@@ -55,23 +54,30 @@ Inherits MCPKit.Tool
 		      Return MCPKit.ToolResult.Failure("Could not resolve the open project's path: " + targetShell)
 		    End If
 
-		    // 2. Build the host project, stamped with the IDE's own version so that opening
-		    //    it does not report an IDE Version Conflict.
-		    Var host As FolderItem = Platform.HostProjectFile(IDEVersionString)
-		    If host = Nil Then
-		      Return MCPKit.ToolResult.Failure("Could not create the temporary host project needed " + _
-		      "to reload on Windows. Nothing was changed. Reload the project manually instead.")
+		    // 2. A second window is only needed if the target is the only one open. When the
+		    //    user already has another project open, it holds the IDE up for us.
+		    Var windowsBefore As Integer = WindowCountFromIDE
+		    Var hostCreated As Boolean = False
+
+		    If windowsBefore = 1 Then
+		      // NewConsoleProject opens an unsaved workspace window. Nothing is written to disk
+		      // and CloseProject(False) discards it without prompting.
+		      Call App.IDE.SendAndReceive("NewConsoleProject" + EndOfLine + "Print ""created""", 30000)
+
+		      If WindowCountFromIDE <= windowsBefore Then
+		        Return MCPKit.ToolResult.Failure("Could not open a second workspace window, which is " + _
+		        "needed because closing the last project would quit the IDE on Windows. Nothing was " + _
+		        "changed. Reload the project manually instead.")
+		      End If
+		      hostCreated = True
+		    ElseIf windowsBefore < 1 Then
+		      Return MCPKit.ToolResult.Failure("Could not read how many workspace windows are open, " + _
+		      "so closing the project might quit the IDE. Nothing was changed.")
 		    End If
 
-		    // 3. Open the host so the IDE has a second window.
-		    If Not OpenAndVerify(host) Then
-		      Return MCPKit.ToolResult.Failure("Could not open the temporary host project (" + _
-		      host.NativePath + "). Nothing was changed. Reload the project manually instead.")
-		    End If
-
-		    // 4. Focus the target, then close it. The host keeps the IDE running.
+		    // 3. Focus the target, then close it. The extra window keeps the IDE running.
 		    If Not OpenAndVerify(target) Then
-		      Call CloseFocusedProject
+		      If hostCreated Then Call CloseUnsavedWindow
 		      Return MCPKit.ToolResult.Failure("Could not focus the project before closing it. " + _
 		      "Nothing was changed. Reload the project manually instead.")
 		    End If
@@ -84,25 +90,28 @@ Inherits MCPKit.Tool
 		      "project: " + App.IDE.LastErrorMessage + " Reopen the project manually: " + target.NativePath)
 		    End If
 		    If SamePath(afterClose, target) Then
-		      Call FocusAndClose(host)
+		      If hostCreated Then Call CloseUnsavedWindow
 		      Return MCPKit.ToolResult.Failure("The project did not close, so it has not been " + _
 		      "reloaded from disk. Nothing was changed.")
 		    End If
 
-		    // 5. Reopen the target from disk.
+		    // 4. Reopen the target from disk.
 		    If Not OpenAndVerify(target) Then
-		      Return MCPKit.ToolResult.Failure("The project was closed but did not reopen. The " + _
-		      "temporary host project is still open in the IDE, so the IDE is still running. " + _
-		      "Reopen the project manually: " + target.NativePath)
+		      Return MCPKit.ToolResult.Failure("The project was closed but did not reopen. Another " + _
+		      "workspace window is still open, so the IDE is still running. Reopen the project " + _
+		      "manually: " + target.NativePath)
 		    End If
 
-		    // 6. Drop the host again, leaving the IDE as we found it.
-		    Call FocusAndClose(host)
+		    // 5. Drop our extra window, leaving the IDE as we found it. It is the only unsaved
+		    //    one, because step 2 only created it when the target was the sole window.
+		    If hostCreated Then
+		      Call CloseUnsavedWindow
+		      Call OpenAndVerify(target)  // restore focus to the user's project
 
-		    Var finalPath As String = ProjectPathFromIDE(reachable)
-		    If reachable And Not SamePath(finalPath, target) Then
-		      Return MCPKit.ToolResult.Success("Project reloaded from disk: " + target.NativePath + _
-		      " (note: the temporary host project could not be closed and is still open in the IDE)")
+		      If WindowCountFromIDE > windowsBefore Then
+		        Return MCPKit.ToolResult.Success("Project reloaded from disk: " + target.NativePath + _
+		        " (note: the temporary empty project could not be closed and is still open in the IDE)")
+		      End If
 		    End If
 
 		    Return MCPKit.ToolResult.Success("Project reloaded from disk: " + target.NativePath)
@@ -190,26 +199,55 @@ Inherits MCPKit.Tool
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
-		Private Function FocusAndClose(project As FolderItem) As Boolean
-		  If project = Nil Then Return False
-		  If Not OpenAndVerify(project) Then Return False
+		Private Function CloseUnsavedWindow() As Boolean
+		  /// Closes the one workspace window that has no path on disk - the empty project this
+		  /// tool created. Only called when we created it, so there is no other unsaved window
+		  /// to confuse it with.
+		  ///
+		  /// Selecting the window and closing it are separate requests: CloseProject tears down
+		  /// the script that would have reported back.
 
+		  Var findScript As String = "Dim found As Integer = -1" + EndOfLine + _
+		  "Dim i As Integer" + EndOfLine + _
+		  "For i = 0 To WindowCount - 1" + EndOfLine + _
+		  "  SelectWindow(i)" + EndOfLine + _
+		  "  If ProjectShellPath = """" Then" + EndOfLine + _
+		  "    found = i" + EndOfLine + _
+		  "    Exit" + EndOfLine + _
+		  "  End If" + EndOfLine + _
+		  "Next" + EndOfLine + _
+		  "Print Str(found)"
+
+		  Var response As JSONItem = App.IDE.SendAndReceive(findScript, 20000)
+		  If response = Nil Or Not response.HasKey("response") Then Return False
+
+		  Var resp As Variant = response.Value("response")
+		  If resp.Type <> Variant.TypeString Then Return False
+		  If resp.StringValue.Trim = "-1" Then Return False
+
+		  // The loop left that window selected, so this closes it.
 		  Return CloseFocusedProject
 
 		End Function
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
-		Private Function IDEVersionString() As String
-		  /// Str(), not Format(): the project file wants a period as the decimal separator
-		  /// regardless of locale.
+		Private Function WindowCountFromIDE() As Integer
+		  /// How many workspace windows the IDE has open, or -1 if it could not be read.
+		  ///
+		  /// This is what makes closing a project safe on Windows: with more than one window
+		  /// open, closing one cannot quit the IDE.
 
-		  Var response As JSONItem = App.IDE.SendAndReceive("Print Str(XojoVersion)")
-		  If response = Nil Then Return ""
-		  If ScriptErrorText(response) <> "" Then Return ""
-		  If Not response.HasKey("response") Then Return ""
+		  Var response As JSONItem = App.IDE.SendAndReceive("Print Str(WindowCount)")
+		  If response = Nil Or Not response.HasKey("response") Then Return -1
 
-		  Return response.Value("response").StringValue.Trim
+		  Var resp As Variant = response.Value("response")
+		  If resp.Type <> Variant.TypeString Then Return -1
+
+		  Var text As String = resp.StringValue.Trim
+		  If text = "" Then Return -1
+
+		  Return text.ToInteger
 
 		End Function
 	#tag EndMethod

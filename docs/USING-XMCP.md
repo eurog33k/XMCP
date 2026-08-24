@@ -136,8 +136,9 @@ So:
   files on disk.
 
 `revert_project` genuinely closes and reopens the project, so unsaved IDE changes are discarded and
-open editor tabs are lost. On Windows you will also see a second project window flash open and
-closed — that's XMCP holding the IDE alive, explained in [section 7](#7-windows-and-macos).
+open editor tabs are lost. On Windows, if the project is your only open window, you will also see an
+empty project flash open and closed — that's XMCP holding the IDE alive, explained in
+[section 7](#7-windows-and-macos).
 
 ---
 
@@ -190,7 +191,7 @@ Linux, so write to a log file there instead.
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | Documentation | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_system_log` | available | **not available** — `System.DebugLog` goes to `OutputDebugString`, which only an attached debugger sees |
-| `revert_project` | closes and reopens the project | same, but briefly opens a throwaway project first |
+| `revert_project` | closes and reopens the project | same, but first opens an empty project to hold the IDE up — skipped if you already have another project open |
 
 Everything else behaves identically. Two Windows-specific rules:
 
