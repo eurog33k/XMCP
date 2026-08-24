@@ -23,23 +23,20 @@ XMCP gives you direct control over the Xojo IDE via 23 tools (22 on Windows — 
 
 ## Known limitations of the IDE scripting API
 
-### 1. Cannot navigate to method-level items or events with `select_project_item`
+### 1. `list_project_items` does not list a class's members
 
-The Xojo IDE scripting API (`SelectProjectItem`) can navigate to top-level items, classes, modules, and windows — but **not** to individual methods, properties, or event implementations within them.
+`list_project_items` shows contained project *items* — the classes and modules inside a folder or module — not the methods, properties or events inside a class. Listing a class often returns `{}`.
 
-`list_project_items` also does not list events — only methods, properties, and constants appear as children.
-
-**Symptom**: `select_project_item` returns `ERROR: Could not select 'Window1.Button1.Pressed'. The IDE scripting API cannot navigate to method-level items...`
-
-**Solution**: Use `get_code` or `set_code` with the full dot-separated path. These tools navigate automatically before reading or writing.
+**Solution**: navigate to members by name instead. `select_project_item`, `get_code` and `set_code` all accept a full dot-separated path and reach methods, properties and event implementations:
 
 ```
-get_code(location: "Window1.Button1.Pressed")      ✓
-get_code(location: "App.UnhandledException")       ✓
-set_code(code: "...", location: "App.MyMethod")    ✓
-select_project_item(item_path: "App.UnhandledException") ✗
-list_project_items(location: "App")  → events not listed  ✗
+select_project_item(item_path: "App.Configure")     ✓  → "Selected: App.Configure (Event Implementation)"
+get_code(location: "IDECommunicator.NextTag")       ✓
+set_code(code: "...", location: "App.MyMethod")     ✓
+list_project_items(location: "IDECommunicator")     →  {}   (members are not items)
 ```
+
+A path that does not exist is reported as `ERROR: Could not navigate to: ...` rather than silently reading the wrong item, so a successful read is a read of what you asked for.
 
 ### 2. Window event handlers cannot be accessed via IDE tools
 

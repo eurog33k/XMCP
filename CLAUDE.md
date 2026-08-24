@@ -74,6 +74,13 @@ End Function
 
 Documentation tools skip step 3 and operate on the in-memory doc cache instead.
 
+### Navigating to project items
+
+`SelectProjectItem` only reaches top-level items; assigning `Location = "Class.Method"` reaches
+methods, properties and event implementations. An invalid assignment leaves `Location` unchanged
+rather than raising, so `select_project_item`, `get_code` and `set_code` assign it and then compare,
+falling back to `SelectProjectItem` for folders.
+
 ### IDE Script Communication
 
 `IDECommunicator.SendAndReceive(script As String) As JSONItem` sends:

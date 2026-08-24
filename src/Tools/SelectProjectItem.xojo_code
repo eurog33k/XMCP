@@ -3,7 +3,7 @@ Protected Class SelectProjectItem
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("select_project_item", "Selects and navigates to a specific item in the Xojo IDE Navigator. Use dot-separated paths like 'Module1.MyMethod'.")
+		  Super.Constructor("select_project_item", "Selects and navigates to a specific item in the Xojo IDE Navigator, including methods, properties and event implementations. Use dot-separated paths like 'Module1.MyMethod' or 'App.Opening'.")
 
 		  Parameters.Add(New MCPKit.ToolParameter("item_path", MCPKit.ToolParameterTypes.String_, _
 		  "Dot-separated path to the project item to select (e.g. 'App', 'Module1.MyMethod').", _
@@ -26,8 +26,17 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("The item_path parameter is required.")
 		  End If
 
-		  Var script As String = "Dim result As Boolean = SelectProjectItem(""" + _
-		  itemPath.ReplaceAll("""", """""") + """)" + EndOfLine + _
+		  // Assigning Location reaches methods and event implementations, which
+		  // SelectProjectItem cannot; it stays as the fallback for folders and other items
+		  // Location does not accept. A bad path leaves Location untouched rather than
+		  // raising, so compare afterwards.
+		  Var target As String = itemPath.ReplaceAll("""", """""")
+		  Var script As String = "Dim target As String = """ + target + """" + EndOfLine + _
+		  "Dim result As Boolean = True" + EndOfLine + _
+		  "Location = target" + EndOfLine + _
+		  "If Location <> target Then" + EndOfLine + _
+		  "  result = SelectProjectItem(target)" + EndOfLine + _
+		  "End If" + EndOfLine + _
 		  "If result Then" + EndOfLine + _
 		  "  Print ""Selected: "" + Location + "" ("" + TypeOfCurrentLocation + "")""" + EndOfLine + _
 		  "Else" + EndOfLine + _

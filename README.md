@@ -6,6 +6,8 @@ XMCP connects to the Xojo IDE via its IPC socket and exposes 23 tools (22 on Win
 
 XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP resource. Compatible clients (e.g. Claude Code) fetch it automatically at session start, giving the AI immediate awareness of XMCP's capabilities, known IDE scripting limitations, and fallback strategies — without any extra configuration. You can edit the file to add project-specific notes without rebuilding.
 
+**New to XMCP?** See [docs/USING-XMCP.md](docs/USING-XMCP.md) for a practical guide to working on a Xojo project with it — the mental model, a first session, how to edit without losing work, and troubleshooting.
+
 ## Requirements
 
 - **Xojo IDE** available for IDE tools (its IPC socket path is discovered automatically; see [IDE Communication](#ide-communication))
@@ -368,7 +370,7 @@ On startup, XMCP scans `SpecialFolder.ApplicationData/Xojo/Xojo/` - `~/Library/A
 - **IDE tools require an open project** — the Xojo IDE scripting socket must be available and a project must be loaded.
 - **Documentation tools require local docs** — depend on `llms-full.txt`, `llms.txt`, and `_sources/*.rst.txt` files shipped with the Xojo IDE.
 - **`get_code`, `set_code`, `get_selected_text`, `set_selected_text` require a method or property to be active** — these tools operate on the code editor view. If the selected item in the Navigator is a class, module, or folder (not a method, property, or other code item), they return an error: `No code editor is active. Navigate to a method or property first.`
-- **`select_project_item` navigates to classes and folders, not individual methods or events** — the Xojo IDE scripting API (`SelectProjectItem`) can navigate to top-level items and classes, but not to individual methods, properties, or event implementations. `list_project_items` also does not list events. To read or write code for a specific method or event, use `get_code` or `set_code` with the full dot-separated path — XMCP navigates automatically before reading/writing.
+- **`list_project_items` does not list a class's members** — it enumerates contained project *items*, so listing a class usually returns `{}`. Navigate to members by name instead: `select_project_item`, `get_code` and `set_code` accept full dot-separated paths and reach methods, properties and event implementations. (These navigate by assigning the IDE's `Location`, which reaches members; the `SelectProjectItem` scripting function alone cannot, and is kept only as a fallback for folders.)
 - **IPC socket timing after navigation** — the Xojo IDE briefly closes its IPC socket (~2–3 seconds) after certain navigation operations. XMCP handles this with automatic retries (up to 5 × 1 second), so tools work reliably, but sequential IDE calls may take a few seconds longer after navigation.
 - **Parallel tool calls are not supported** — the Xojo IDE accepts only one IPC connection at a time. MCP clients that send parallel tool calls (e.g. Claude Code in some modes) may see connection errors on concurrent requests. Sequential tool calls work reliably.
 

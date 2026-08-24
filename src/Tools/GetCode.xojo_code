@@ -25,10 +25,19 @@ Inherits MCPKit.Tool
 		  Var script As String = ""
 
 		  If location <> "" Then
-		    script = "Dim result As Boolean = SelectProjectItem(""" + _
-		    location.ReplaceAll("""", """""") + """)" + EndOfLine + _
-		    "If Not result Then" + EndOfLine + _
-		    "  Print ""ERROR: Could not navigate to: " + location.ReplaceAll("""", """""") + ". For window event handlers, edit the .xojo_window file directly on disk and call revert_project.""" + EndOfLine + _
+		    // Assigning Location reaches methods and event implementations, which
+		    // SelectProjectItem cannot. A bad path leaves Location untouched rather than
+		    // raising, so compare afterwards; SelectProjectItem remains the fallback for
+		    // folders and other items Location does not accept.
+		    Var target As String = location.ReplaceAll("""", """""")
+		    script = "Dim target As String = """ + target + """" + EndOfLine + _
+		    "Dim ok As Boolean = True" + EndOfLine + _
+		    "Location = target" + EndOfLine + _
+		    "If Location <> target Then" + EndOfLine + _
+		    "  ok = SelectProjectItem(target)" + EndOfLine + _
+		    "End If" + EndOfLine + _
+		    "If Not ok Then" + EndOfLine + _
+		    "  Print ""ERROR: Could not navigate to: " + target + ". For window event handlers, edit the .xojo_window file directly on disk and call revert_project.""" + EndOfLine + _
 		    "Else" + EndOfLine + _
 		    "  Try" + EndOfLine + _
 		    "    Print Text" + EndOfLine + _
