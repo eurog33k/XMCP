@@ -36,7 +36,9 @@ set_code(code: "...", location: "App.MyMethod")     ✓
 list_project_items(location: "IDECommunicator")     →  {}   (members are not items)
 ```
 
-A path that does not exist is reported as `ERROR: Could not navigate to: ...` rather than silently reading the wrong item, so a successful read is a read of what you asked for.
+A path that does not exist is reported as `ERROR: Could not navigate to: ...` rather than silently reading the wrong item.
+
+**Overloads are the exception.** A name with several signatures - `Module1.GetFileExtention(f As FolderItem)` and `Module1.GetFileExtention(s As String)` - resolves to one of them, with nothing in the result saying which, and there is no way to name a signature. When you know a method is overloaded, read the `.xojo_code` file on disk to see every version.
 
 ### 2. Window event handlers cannot be accessed via IDE tools
 

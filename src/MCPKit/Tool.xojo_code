@@ -185,7 +185,7 @@ Protected Class Tool
 
 	#tag Method, Flags = &h1
 		Protected Function BuildStringVariableScript(variableName As String, value As String) As String
-		  Var lines() As String = value.Split(EndOfLine)
+		  Var lines() As String = SplitLines(value)
 		  Var scriptLines() As String
 
 		  scriptLines.Add("Dim " + variableName + " As String = """"")
@@ -209,9 +209,30 @@ Protected Class Tool
 
 	#tag Method, Flags = &h1
 		Protected Function HasTrailingEndOfLine(value As String) As Boolean
-		  Var eol As String = EndOfLine
-		  If value.Length < eol.Length Then Return False
-		  Return value.Right(eol.Length) = eol
+		  /// Tests for any line ending, not the platform's. Comparing against EndOfLine meant
+		  /// that on Windows an LF-terminated value - which is what arrives over JSON-RPC -
+		  /// was measured against CRLF and reported as unterminated.
+
+		  If value = "" Then Return False
+
+		  Var last As String = value.Right(1)
+		  Return last = Chr(10) Or last = Chr(13)
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h1
+		Protected Function SplitLines(value As String) As String()
+		  /// Splits on any line ending rather than the platform's.
+		  ///
+		  /// Text reaching XMCP is LF terminated whatever the platform: JSON-RPC payloads use
+		  /// \n, and Xojo ships its documentation files LF-only. EndOfLine is CRLF on Windows,
+		  /// so Split(EndOfLine) there finds no delimiter and hands back the entire input as a
+		  /// single line. For set_code that produced one string literal containing raw line
+		  /// feeds - a Xojo compiler error 68, "End quote missing" - and for the documentation
+		  /// tools it collapsed a 1500-line index into one line.
+
+		  Return value.ReplaceLineEndings(Chr(10)).Split(Chr(10))
 
 		End Function
 	#tag EndMethod

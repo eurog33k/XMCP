@@ -55,7 +55,7 @@ Inherits MCPKit.Tool
 		      tis.Encoding = Encodings.UTF8
 		      Var allText As String = tis.ReadAll
 		      tis.Close
-		      mCachedLines = allText.Split(EndOfLine)
+		      mCachedLines = SplitLines(allText)
 		    Catch e As IOException
 		      Return MCPKit.ToolResult.Failure("Error reading documentation: " + e.Message)
 		    End Try

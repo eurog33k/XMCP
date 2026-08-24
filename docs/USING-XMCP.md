@@ -98,6 +98,7 @@ IDE scripting command without a dedicated tool.
 | `get_code` says *"No code editor is active"* | the current location isn't a code item (a class or folder is selected) | pass an explicit `location` to `get_code` instead of relying on the current selection |
 | Window event handlers are invisible | they live in `.xojo_window`, which IDE scripting doesn't expose | edit the file on disk, then `revert_project` — see [section 5](#5-editing-safely) |
 | `set_code` leaves a trailing blank line | quirk of writing through the code editor | harmless; ignore it |
+| An overloaded method reads back one version | paths carry no signature, so the IDE resolves the name to one of them | read the `.xojo_code` file on disk when you need to see every overload |
 | Two tool calls at once fail | the IDE accepts one IPC connection at a time | keep calls sequential |
 | A call right after navigation times out | the IDE briefly closes its socket after some navigation | XMCP retries automatically; if one still fails, just retry |
 

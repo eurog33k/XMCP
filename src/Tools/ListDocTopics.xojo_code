@@ -42,7 +42,7 @@ Inherits MCPKit.Tool
 		    End If
 
 		    // Filter the lines.
-		    Var lines() As String = content.Split(EndOfLine)
+		    Var lines() As String = SplitLines(content)
 		    Var matches() As String
 		    Var lowerFilter As String = filter.Lowercase
 
