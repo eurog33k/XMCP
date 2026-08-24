@@ -62,12 +62,9 @@ Inherits MCPKit.ServerApplication
 		  New GetDebugLog _
 		  )
 		  
-		  // get_system_log reads the macOS unified log; there is no equivalent elsewhere,
-		  // so it is not advertised on other platforms. RegisterTools appends, so this
-		  // simply adds to the list above.
-		  #If TargetMacOS Then
-		    RegisterTools(New GetSystemLog)
-		  #EndIf
+		  // get_system_log reads output that only macOS keeps; see
+		  // Platform.SupportsSystemLog. RegisterTools appends, so this adds to the list above.
+		  If Platform.SupportsSystemLog Then RegisterTools(New GetSystemLog)
 		  
 		  If Verbose Then System.DebugLog("XMCP server configured with " + mTools.Count.ToString + " tools.")
 		  
@@ -79,13 +76,11 @@ Inherits MCPKit.ServerApplication
 		  If CommandLineParser.HelpRequested Then
 		    CommandLineParser.ShowHelp("Options")
 		    Print("")
-		    // A literal, not mTools.Count: DidParseOptions runs before Configure, so no
-		    // tools are registered yet at this point.
-		    #If TargetMacOS Then
-		      Print("MCP Tools (23):")
-		    #Else
-		      Print("MCP Tools (22):")
-		    #EndIf
+		    // Counted, not mTools.Count: DidParseOptions runs before Configure, so nothing is
+		    // registered yet. Keep kToolCount in step when adding a tool.
+		    Var toolCount As Integer = kToolCount
+		    If Not Platform.SupportsSystemLog Then toolCount = toolCount - 1
+		    Print("MCP Tools (" + toolCount.ToString + "):")
 		    Print("")
 		    Print("  IDE Tools:")
 		    Print("  list_project_items   List child items at a project location")
@@ -116,19 +111,15 @@ Inherits MCPKit.ServerApplication
 		    Print("")
 		    Print("  Debug Tools:")
 		    Print("  get_debug_log        Read crash/exception log from " + Platform.DebugLogPath)
-		    #If TargetMacOS Then
+		    If Platform.SupportsSystemLog Then
 		      Print("  get_system_log       Read System.DebugLog output from macOS unified log")
-		    #EndIf
+		    End If
 		    Print("")
 		    Print("Usage:")
 		    Print("  The XMCP server communicates via JSON-RPC over stdin/stdout (MCP protocol).")
 		    Print("  It connects to the Xojo IDE via an IPC socket. Candidate paths on this")
 		    Print("  platform: " + Platform.SocketPathSummary)
-		    #If TargetWindows Then
-		      Print("  Documentation is auto-detected from %APPDATA%\Xojo\Xojo")
-		    #Else
-		      Print("  Documentation is auto-detected from ~/Library/Application Support/Xojo/")
-		    #EndIf
+		    Print("  Documentation is auto-detected from " + Platform.DocsRootPath)
 		    Print("  or can be specified with --docs-path.")
 		    Print("")
 		    Print("  Make sure the Xojo IDE is running before starting this server.")
@@ -137,11 +128,10 @@ Inherits MCPKit.ServerApplication
 		    Print("  {")
 		    Print("    ""mcpServers"": {")
 		    Print("      ""xmcp"": {")
-		    #If TargetWindows Then
-		      Print("        ""command"": ""C:\\path\\to\\XMCP.exe""")
-		    #Else
-		      Print("        ""command"": ""/path/to/XMCP""")
-		    #EndIf
+		    // The real path, with backslashes doubled so the line is valid JSON on Windows.
+		    Var ownPath As String = "/path/to/XMCP"
+		    If App.ExecutableFile <> Nil Then ownPath = App.ExecutableFile.NativePath
+		    Print("        ""command"": """ + ownPath.ReplaceAll("\", "\\") + """")
 		    Print("      }")
 		    Print("    }")
 		    Print("  }")
@@ -249,6 +239,9 @@ Inherits MCPKit.ServerApplication
 		End Function
 	#tag EndMethod
 
+
+	#tag Constant, Name = kToolCount, Type = Double, Dynamic = False, Default = \"23", Scope = Private
+	#tag EndConstant
 
 	#tag Property, Flags = &h0, Description = 5061746820746F20586F6A6F20646F63756D656E746174696F6E206469726563746F72792E
 		DocsPath As FolderItem

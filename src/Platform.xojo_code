@@ -105,6 +105,42 @@ Protected Module Platform
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
+		Function DocsRootPath() As String
+		  /// Where the Xojo IDE keeps installed documentation, resolved rather than described:
+		  /// ~/Library/Application Support/Xojo/Xojo on macOS, %APPDATA%\Xojo\Xojo on Windows.
+
+		  Var root As FolderItem = SpecialFolder.ApplicationData
+		  If root = Nil Then Return "(application data folder not found)"
+
+		  Var vendor As FolderItem = SafeChild(root, "Xojo")
+		  If vendor = Nil Then Return root.NativePath
+
+		  Var inner As FolderItem = SafeChild(vendor, "Xojo")
+		  If inner = Nil Then Return vendor.NativePath
+
+		  Return inner.NativePath
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
+		Function SupportsSystemLog() As Boolean
+		  /// Whether System.DebugLog output can be read back after the fact. Only macOS keeps
+		  /// it: there it goes to the unified log, on Windows to OutputDebugString - which only
+		  /// an attached debugger sees - and on Linux to stderr.
+		  ///
+		  /// This is the single place that knows it, so callers stay free of #If.
+
+		  #If TargetMacOS Then
+		    Return True
+		  #Else
+		    Return False
+		  #EndIf
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
 		Function HostProjectFile(ideVersion As String) As FolderItem
 		  /// Writes a minimal throwaway console project and returns it, or Nil on failure.
 		  ///
