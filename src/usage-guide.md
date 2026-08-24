@@ -85,7 +85,9 @@ Consequences when writing code for the user:
 
 ## Fallback: direct file editing
 
-> **Windows:** step 2 below (`revert_project`) does not work - see *Platform differences*. Write the file, then ask the user to close and reopen the project in the IDE.
+> **Windows:** step 2 below (`revert_project`) does not work - see *Platform differences*. Write the file, then ask the user to reload the project in the IDE.
+>
+> **`build_project` builds the IDE's in-memory project, not the files on disk.** So on Windows, editing a file on disk and then building will build the *old* code and report success. Either get the project reloaded first, or avoid the disk route: `set_code` writes into the IDE directly, and `run_ide_script` with `DoCommand "SaveFile"` saves it to disk. That loop needs no reload in either direction and is the better default on Windows.
 
 When IDE tools cannot access an item, edit the source files directly on disk and reload the project.
 
