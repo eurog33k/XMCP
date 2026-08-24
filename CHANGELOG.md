@@ -7,6 +7,7 @@ All notable changes to XMCP will be documented here.
 ## [1.3.0] - 2026-08-24
 
 ### Added
+- `revert_project` now works on Windows. Reloading needs the project closed and reopened, and closing the last project window quits the Xojo IDE there - so the close is performed while a generated throwaway project (`%TEMP%\XMCP Host`, stamped with the IDE's own version so it opens without warnings) holds the IDE open, then closed again. `OpenFile` on an already-open project focuses it without reloading, which is what makes the ordering controllable, and every step is verified against `ProjectShellPath`
 - `save_project` tool — saves the IDE's in-memory project to disk via `DoCommand "SaveFile"`. Together with `set_code` this gives a complete round trip that needs no project reload, which matters on Windows where `revert_project` is unavailable
 - **Windows support.** All platform-dependent paths now live in a new `Platform` module: IPC socket discovery, the debug log location, and the documentation root. Verified on Windows 11 with Xojo 2026r1.1 — MCP handshake, tool listing, IDE connection, and documentation lookup all work
 - IPC socket discovery now mirrors `FindIPCPath` from Xojo's shipped IDECommunicator v2 example, probing candidate *folders* for writability instead of testing the socket path itself. On Windows the socket resolves to `%LOCALAPPDATA%\Temp\XojoIDE`

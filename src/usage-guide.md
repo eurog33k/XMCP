@@ -70,7 +70,7 @@ XMCP runs on macOS and Windows. What changes:
 | IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (no file exists at that path — the endpoint is a named pipe) |
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | `get_system_log` | available | **not registered** — no unified-log equivalent |
-| `revert_project` | works | **not supported** — ask the user to reopen the project (see below) |
+| `revert_project` | works | works — briefly opens a throwaway project to keep the IDE alive |
 | Docs location | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_project_info` paths | POSIX paths | long paths (XMCP converts the IDE's 8.3 short paths back) |
 
@@ -80,7 +80,7 @@ Consequences when writing code for the user:
 - On Windows you cannot read `System.DebugLog` output at all. If the user needs runtime diagnostics there, write to a log file from the app instead of calling `System.DebugLog`.
 - XMCP must run as the same OS user as the Xojo IDE on Windows, because the socket path is under that user's profile. A "No IDE listener" error lists every path that was tried.
 - If every tool fails with "No IDE listener" on Windows and the IDE seems to close by itself, check for `XOJO_AUTOMATION=TRUE` in the environment: on Windows the IDE exits right after loading a project when that is set. Tell the user to unset it and relaunch the IDE.
-- **On Windows, `revert_project` cannot reload the project.** The only non-interactive reload is `CloseProject` + `OpenFile`, and closing the last project window quits the Xojo IDE. `DoCommand "Revert"` is not a way around it: it needs a modal confirmation click and blocks the IDE while the dialog is open. So on Windows: write your edits to disk as usual, then **tell the user to reload the project** (File > Revert to Saved, or close and reopen) before you read the changed items back. Do not call `revert_project` and assume it worked - it returns an explicit failure there and changes nothing.
+- **`revert_project` works on Windows, with a visible side effect.** Reloading needs the project closed and reopened, and closing the last project window quits the Xojo IDE - so XMCP briefly opens a generated throwaway project to hold the IDE open, then closes it again. The user may see a second project window appear and disappear. If it fails partway it says so and names the path to reopen; it never leaves the IDE dead.
 
 ---
 
@@ -91,21 +91,19 @@ The IDE keeps its own in-memory copy of the project. There are two ways to chang
 | Route | Writes to | Gets to the other side by |
 |---|---|---|
 | `set_code`, `create_project_item`, `constant_value` | the IDE's memory | `save_project` |
-| Editing `.xojo_code` / `.xojo_window` on disk | the files | `revert_project` (macOS/Linux) or a manual reload (Windows) |
+| Editing `.xojo_code` / `.xojo_window` on disk | the files | `revert_project` |
 
 **Do not interleave them.** If you edit files on disk and then anything saves from the IDE side - `save_project`, or the user pressing Ctrl/Cmd+S - the IDE writes its in-memory copy over your edits and they are gone. Likewise a reload discards unsaved IDE changes.
 
 Pick one route per change and finish it:
 
 - **Preferred:** `set_code` → `save_project`. Fully scripted, no reload, no clobber risk. Use this for anything IDE scripting can reach.
-- **Fallback:** write the file, then reload before touching the IDE again. Needed for window event handlers and items `get_code` cannot reach. On Windows the reload is manual, so the window for clobbering is wider - never call `save_project` after editing files on disk.
+- **Fallback:** write the file, then `revert_project` before touching the IDE again. Needed for window event handlers and items `get_code` cannot reach. Never call `save_project` after editing files on disk - that overwrites your edits with the IDE's older copy.
 
 ---
 
 ## Fallback: direct file editing
 
-> **Windows:** step 2 below (`revert_project`) does not work - see *Platform differences*. Write the file, then ask the user to reload the project in the IDE.
->
 > **`build_project` builds the IDE's in-memory project, not the files on disk.** So on Windows, editing a file on disk and then building will build the *old* code and report success. Either get the project reloaded first, or avoid the disk route entirely: `set_code` writes into the IDE directly and `save_project` writes it out to disk. That `set_code` → `save_project` → `build_project` loop needs no reload in either direction and is the better default on Windows.
 
 When IDE tools cannot access an item, edit the source files directly on disk and reload the project.

@@ -110,7 +110,7 @@ Some items in a Xojo project cannot be accessed via the IDE scripting API. The w
 
 **Workflow:**
 1. Edit the `.xojo_code` or `.xojo_window` file directly as plain text
-2. Call `revert_project` to reload the project — **macOS/Linux only**. On Windows it returns a failure and changes nothing: `CloseProject(False)` + `OpenFile` is the only non-interactive way to reload, and on Windows closing the last project window quits the IDE. Ask the user to reload it themselves there.
+2. Call `revert_project` to reload the project. `CloseProject(False)` + `OpenFile` is the only non-interactive way to reload, and on Windows closing the last project window would quit the IDE — so there the close happens while a generated throwaway project (in `%TEMP%\XMCP Host`) holds the IDE open, and is closed again afterwards. Both paths verify each step against `ProjectShellPath` rather than trusting the IDE's replies.
 
 `DoCommand "Revert"` is not an automatable alternative on any platform. It does reload from disk, but only after a modal confirmation dialog that a human must click, and while that dialog is up the IDE's script engine is blocked — so every XMCP tool hangs until it is dismissed. It also requires the project to have a pending change; against a clean project the menu item does nothing.
 
