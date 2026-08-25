@@ -253,10 +253,10 @@ Protected Module ProjectSource
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
-		Function Load(ByRef errorMessage As String, ByRef note As String) As XKProject
+		Function Load(ByRef errorMessage As String, ByRef note As String, saveFirst As Boolean = True) As XKProject
 		  /// Saves the open project and parses the files on disk, or returns Nil with a reason.
 		  ///
-		  /// The save is deliberate and unconditional. Everything here reads the FILES, while
+		  /// The save is deliberate and on by default. Everything here reads the FILES, while
 		  /// the rest of XMCP reads the IDE's memory, and the IDE cannot be asked whether it
 		  /// has unsaved changes - there is no such command - so the only way to guarantee the
 		  /// two agree is to write memory out first. Saving an unchanged project does nothing.
@@ -264,6 +264,10 @@ Protected Module ProjectSource
 		  /// The consequence is documented and deliberate: if the caller has edited a file on
 		  /// disk without reloading, this save overwrites that edit with the IDE's older copy.
 		  /// Callers surface the `note` so the user can see a save happened.
+		  ///
+		  /// Pass saveFirst = False for a read whose answer is only ever used to decline. A
+		  /// check that refuses should not be the reason unrelated pending edits get written
+		  /// out; the cost is that the files may be behind the IDE, which the note says.
 
 		  errorMessage = ""
 		  note = ""
@@ -308,6 +312,9 @@ Protected Module ProjectSource
 		    " and this IDE is " + Format(ideVersion, "0000.000") + ", so saving would rewrite it in the " + _
 		    "older format. The files below are whatever was last written to disk, which may be behind " + _
 		    "the IDE."
+		  ElseIf Not saveFirst Then
+		    note = "NOT saved first: the caller asked for the files as they are on disk, so they may " + _
+		    "be behind what the IDE holds."
 		  Else
 		    Call App.IDE.SendAndReceive("DoCommand(""SaveFile"")" + EndOfLine + "Print ""saved""", 30000)
 		    note = "The project was saved to disk first, so these files match the IDE."
@@ -401,6 +408,29 @@ Protected Module ProjectSource
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
+		Function CountMemberDeclarations(project As XKProject, path As String, ByRef errorMessage As String) As Integer
+		  /// How many #tag blocks in the owner's file declare this member name, or -1 if that
+		  /// cannot be determined.
+		  ///
+		  /// This exists so a caller can learn that a name is overloaded BEFORE it touches
+		  /// anything. delete_project_item needs it: DoCommand("DeleteSelection") acts on
+		  /// whichever overload the editor happened to resolve to, which is precisely the guess
+		  /// RemoveMemberFromFile refuses to make.
+		  
+		  errorMessage = ""
+		  
+		  Var declarations As Integer = 0
+		  Var file As FolderItem
+		  Call ScanMemberBlocks(project, path, declarations, file, errorMessage)
+		  
+		  If errorMessage <> "" Then Return -1
+		  
+		  Return declarations
+		  
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
 		Function RemoveMemberFromFile(project As XKProject, path As String, ByRef errorMessage As String) As Boolean
 		  /// Deletes a member by cutting its #tag block out of the .xojo_code file that holds it.
 		  ///
@@ -409,33 +439,85 @@ Protected Module ProjectSource
 		  /// IDE will still hold the member and write it back on its next save.
 		  ///
 		  /// Refuses when the name is ambiguous. Cutting the wrong overload out of a source file
-		  /// is not a mistake worth risking to save a round trip.
-
+		  /// is not a mistake worth risking to save a round trip. Every check runs against lines
+		  /// held in memory and nothing is written until all of them pass, so a refusal leaves
+		  /// the file byte for byte as it was.
+		  
 		  errorMessage = ""
+		  
+		  Var declarations As Integer = 0
+		  Var file As FolderItem
+		  Var keep() As String = ScanMemberBlocks(project, path, declarations, file, errorMessage)
+		  
+		  If errorMessage <> "" Then Return False
+		  
+		  Var parts() As String = path.Split(".")
+		  Var name As String = parts(parts.LastIndex)
+		  
+		  If declarations = 0 Then
+		    errorMessage = "Found no declaration of """ + name + """ in " + file.NativePath + "."
+		    Return False
+		  End If
+		  
+		  If declarations > 1 Then
+		    errorMessage = """" + name + """ has " + declarations.ToString + " declarations in " + _
+		    file.NativePath + ". Refusing to guess which to delete - remove the right #tag block " + _
+		    "by hand, then call revert_project. describe_item lists them with their signatures."
+		    Return False
+		  End If
+		  
+		  Try
+		    Var out As TextOutputStream = TextOutputStream.Create(file)
+		    out.Write(String.FromArray(keep, EndOfLine))
+		    out.Close
+		  Catch e As RuntimeException
+		    errorMessage = "Could not write " + file.NativePath + ": " + e.Message
+		    Return False
+		  End Try
+		  
+		  Return True
+		  
+		End Function
+	#tag EndMethod
 
+	#tag Method, Flags = &h21
+		Private Function ScanMemberBlocks(project As XKProject, path As String, ByRef declarations As Integer, ByRef file As FolderItem, ByRef errorMessage As String) As String()
+		  /// Splits the file that owns `path` into the lines that survive removing the member,
+		  /// and counts the #tag blocks that declare it. Reads only - it never writes, so both
+		  /// the counting and the removing callers can share one scanner.
+		  ///
+		  /// A non-empty errorMessage on return means the scan failed and the result is
+		  /// meaningless.
+		  
+		  errorMessage = ""
+		  declarations = 0
+		  file = Nil
+		  
+		  Var keep() As String
+		  
 		  Var parts() As String = path.Split(".")
 		  If parts.Count < 2 Then
 		    errorMessage = "Not a member path: " + path
-		    Return False
+		    Return keep
 		  End If
-
+		  
 		  Var name As String = parts(parts.LastIndex)
 		  parts.RemoveAt(parts.LastIndex)
 		  Var ownerPath As String = String.FromArray(parts, ".")
-
+		  
 		  Var owner As XKProjectItem = FindItem(project, ownerPath)
 		  If owner = Nil Then
 		    errorMessage = "Could not find " + ownerPath + " in the project files."
-		    Return False
+		    Return keep
 		  End If
-
-		  Var file As FolderItem = ItemFile(project, owner)
+		  
+		  file = ItemFile(project, owner)
 		  If file = Nil Then
 		    errorMessage = "Could not locate the file for " + ownerPath + _
 		    ". External items and binary projects cannot be edited this way."
-		    Return False
+		    Return keep
 		  End If
-
+		  
 		  Var contents As String
 		  Try
 		    Var stream As TextInputStream = TextInputStream.Open(file)
@@ -444,23 +526,21 @@ Protected Module ProjectSource
 		    stream.Close
 		  Catch e As RuntimeException
 		    errorMessage = "Could not read " + file.NativePath + ": " + e.Message
-		    Return False
+		    Return keep
 		  End Try
-
+		  
 		  Var lines() As String = contents.ReplaceLineEndings(Chr(10)).Split(Chr(10))
-		  Var keep() As String
-
+		  
 		  Var blockStart As Integer = -1
 		  Var blockKind As String = ""
 		  Var blockMatches As Boolean = False
-		  Var removed As Integer = 0
 		  Var swallowBlank As Boolean = False
 		  Var pending() As String
-
+		  
 		  For i As Integer = 0 To lines.LastIndex
 		    Var line As String = lines(i)
 		    Var trimmed As String = line.Trim
-
+		    
 		    If blockStart < 0 Then
 		      // Swallow one blank line left behind by a removed block, so repeated deletes do
 		      // not accumulate empty lines in the file.
@@ -468,7 +548,7 @@ Protected Module ProjectSource
 		        swallowBlank = False
 		        If trimmed = "" Then Continue
 		      End If
-
+		      
 		      Var kind As String = BlockKind(trimmed)
 		      If kind <> "" Then
 		        blockStart = i
@@ -478,18 +558,18 @@ Protected Module ProjectSource
 		        pending.Add(line)
 		        Continue
 		      End If
-
+		      
 		      keep.Add(line)
 		      Continue
 		    End If
-
+		    
 		    // Inside a block: collect it, and watch for the declaration that names the member.
 		    pending.Add(line)
 		    If Not blockMatches And DeclaresName(blockKind, trimmed, name) Then blockMatches = True
-
+		    
 		    If trimmed = "#tag End" + blockKind Then
 		      If blockMatches Then
-		        removed = removed + 1
+		        declarations = declarations + 1
 		        swallowBlank = True
 		      Else
 		        For Each held As String In pending
@@ -502,35 +582,14 @@ Protected Module ProjectSource
 		      pending.RemoveAll
 		    End If
 		  Next i
-
+		  
 		  If blockStart >= 0 Then
 		    errorMessage = "The file ends inside an unterminated #tag block; refusing to edit it."
-		    Return False
+		    Return keep
 		  End If
-
-		  If removed = 0 Then
-		    errorMessage = "Found no declaration of """ + name + """ in " + file.NativePath + "."
-		    Return False
-		  End If
-
-		  If removed > 1 Then
-		    errorMessage = """" + name + """ has " + removed.ToString + " declarations in " + _
-		    file.NativePath + ". Refusing to guess which to delete - remove the right #tag block " + _
-		    "by hand, then call revert_project. describe_item lists them with their signatures."
-		    Return False
-		  End If
-
-		  Try
-		    Var out As TextOutputStream = TextOutputStream.Create(file)
-		    out.Write(String.FromArray(keep, EndOfLine))
-		    out.Close
-		  Catch e As RuntimeException
-		    errorMessage = "Could not write " + file.NativePath + ": " + e.Message
-		    Return False
-		  End Try
-
-		  Return True
-
+		  
+		  Return keep
+		  
 		End Function
 	#tag EndMethod
 

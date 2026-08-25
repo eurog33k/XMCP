@@ -70,14 +70,30 @@ Inherits MCPKit.Tool
 		  Else
 		    // A member: a method, property, constant or event inside a class or module.
 		    // SelectProjectItem cannot reach it, so Delete is not an option at any price.
-		    // DeleteSelection works on the editor's item, but only on macOS - Xojo documents
-		    // it as not implemented and on Windows it does nothing.
-		    If Not FocusEditorOn(itemPath) Then
-		      Return MCPKit.ToolResult.Failure("Could not open " + itemPath + " in the editor, so it " + _
-		      "cannot be deleted. Nothing was deleted.")
-		    End If
+		    //
+		    // Ask about overloads BEFORE touching anything. Both routes end up having to pick
+		    // one of them, and neither has any basis for the choice.
+		    Var refusal As String = OverloadRefusal(itemPath)
+		    If refusal <> "" Then Return MCPKit.ToolResult.Failure(refusal)
 
-		    Call App.IDE.SendAndReceive("DoCommand(""DeleteSelection"")", 5000)
+		    #If TargetMacOS Then
+		      // DeleteSelection removes the editor's member here. Everywhere else Xojo documents
+		      // it as not implemented, and on Windows it is worse than a no-op: it edits the TEXT
+		      // at the caret. Verified on Windows 11 with Xojo 2026r1.1 - a character vanished
+		      // from the body of the focused method, the save that the file route performs next
+		      // committed that to disk, and the tool still reported that nothing was deleted.
+		      // Only build_project noticed. So it is sent on macOS and nowhere else.
+		      If Not FocusEditorOn(itemPath) Then
+		        Return MCPKit.ToolResult.Failure("Could not open " + itemPath + " in the editor, so it " + _
+		        "cannot be deleted. Nothing was deleted.")
+		      End If
+
+		      Call App.IDE.SendAndReceive("DoCommand(""DeleteSelection"")", 5000)
+		    #Else
+		      // Nothing here can delete a member, and trying is destructive. Go straight to the
+		      // file, which is the only route that works on this platform anyway.
+		      Return DeleteViaFile(itemPath)
+		    #EndIf
 		  End If
 
 		  // 3. Gone? DeleteSelection suppresses the output of the script that follows it, so the
@@ -161,6 +177,33 @@ Inherits MCPKit.Tool
 		  "on this platform, so its block was removed from the project file and the project reloaded. " + _
 		  "This one IS on disk already, unlike a delete the IDE performs - use source control to undo it.")
 
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function OverloadRefusal(itemPath As String) As String
+		  /// A refusal message when the member name is declared more than once, or "" to proceed.
+		  ///
+		  /// Read WITHOUT saving the project, deliberately. This runs before anything has been
+		  /// touched and its answer is only ever used to decline, so it should not be the reason
+		  /// unrelated pending edits get written to disk. If the files cannot be read at all the
+		  /// answer is "proceed" - whichever route follows reports the real problem in its own
+		  /// words, and this check has no business inventing one.
+		  
+		  Var loadError As String
+		  Var note As String
+		  Var project As XKProject = ProjectSource.Load(loadError, note, False)
+		  If project = Nil Then Return ""
+		  
+		  Var countError As String
+		  Var declarations As Integer = ProjectSource.CountMemberDeclarations(project, itemPath, countError)
+		  If declarations <= 1 Then Return ""
+		  
+		  Return LastPathComponent(itemPath) + " is declared " + declarations.ToString + " times in the " + _
+		  "project file, and nothing here can tell which one you mean. Nothing was deleted, and no file " + _
+		  "was touched. describe_item lists the declarations with their signatures - remove the right " + _
+		  "#tag block by hand and call revert_project."
+		  
 		End Function
 	#tag EndMethod
 
