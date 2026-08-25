@@ -20,7 +20,13 @@ Inherits MCPKit.Tool
 		  // is nothing to check against and the old behaviour is all that is left.
 		  Var projectDir As String = ProjectDirectory
 
-		  // 1. Ask the IDE first. This is the polite route and it is enough for a desktop app.
+		  // 1. What was running before? Without this the two outcomes are indistinguishable:
+		  //    "the Kill worked" and "there was nothing to kill" both end with no process, and
+		  //    reporting them in the same words tells the caller nothing about what happened.
+		  Var before() As String
+		  If projectDir <> "" Then before = DebugProcesses(projectDir)
+
+		  // 2. Ask the IDE. This is the polite route and it is enough for a desktop app.
 		  Call App.IDE.SendAndReceive("DoCommand ""Kill""" + EndOfLine + "Print ""killed""", 20000)
 
 		  If projectDir = "" Then
@@ -30,16 +36,22 @@ Inherits MCPKit.Tool
 
 		  Thread.SleepCurrent(1500)
 
-		  // 2. Did that work? DoCommand "Kill" does stop a desktop app but leaves a CONSOLE debug
+		  // 3. Did that work? DoCommand "Kill" does stop a desktop app but leaves a CONSOLE debug
 		  //    build running, and it reports nothing either way - which is why this tool used to
 		  //    print "Debug session stopped." whether or not anything had stopped.
 		  Var running() As String = DebugProcesses(projectDir)
 		  If running.Count = 0 Then
-		    Return MCPKit.ToolResult.Success("Debug session stopped, verified: no debug build of this " + _
-		    "project is running.")
+		    If before.Count = 0 Then
+		      Return MCPKit.ToolResult.Success("Nothing to stop: no debug build of this project was " + _
+		      "running before the Kill or after it. The IDE was asked anyway, in case it held a " + _
+		      "session this cannot see.")
+		    End If
+
+		    Return MCPKit.ToolResult.Success("Debug session stopped by the IDE, verified: " + _
+		    before.Count.ToString + " debug process(es) were running and none are now.")
 		  End If
 
-		  // 3. Still there, so stop it directly.
+		  // 4. Still there, so stop it directly.
 		  Var killed() As String
 		  Var failed() As String
 

@@ -70,13 +70,13 @@ Inherits MCPKit.Tool
 		  Else
 		    // A member: a method, property, constant or event inside a class or module.
 		    // SelectProjectItem cannot reach it, so Delete is not an option at any price.
-		    //
-		    // Ask about overloads BEFORE touching anything. Both routes end up having to pick
-		    // one of them, and neither has any basis for the choice.
-		    Var refusal As String = OverloadRefusal(itemPath)
-		    If refusal <> "" Then Return MCPKit.ToolResult.Failure(refusal)
-
 		    #If TargetMacOS Then
+		      // Ask about overloads BEFORE the editor is touched: DeleteSelection acts on whichever
+		      // one the editor resolved to, which is the guess the file route refuses to make. Off
+		      // macOS DeleteViaFile establishes the same thing on its own non-saving read.
+		      Var refusal As String = OverloadRefusal(itemPath)
+		      If refusal <> "" Then Return MCPKit.ToolResult.Failure(refusal)
+
 		      // DeleteSelection removes the editor's member here. Everywhere else Xojo documents
 		      // it as not implemented, and on Windows it is worse than a no-op: it edits the TEXT
 		      // at the caret. Verified on Windows 11 with Xojo 2026r1.1 - a character vanished
@@ -114,8 +114,11 @@ Inherits MCPKit.Tool
 		    Return DeleteViaFile(itemPath)
 		  End If
 
-		  Return MCPKit.ToolResult.Success("Deleted: " + itemPath + ". This is not saved to disk yet - " + _
-		  "revert_project restores it, save_project makes it permanent.")
+		  Return MCPKit.ToolResult.Success("Deleted: " + itemPath + ". This is not saved to disk yet, so " + _
+		  "revert_project restores it and save_project makes it permanent. describe_item and " + _
+		  "list_project_items read the files on disk and do not save first, so they will still show it " + _
+		  "until you save - deliberately, so that checking a delete cannot be the thing that makes it " + _
+		  "permanent.")
 
 		End Function
 	#tag EndMethod
@@ -146,7 +149,40 @@ Inherits MCPKit.Tool
 	#tag Method, Flags = &h21
 		Private Function DeleteViaFile(itemPath As String) As MCPKit.ToolResult
 		  /// Removes a member by editing the project file, then reloads so the IDE agrees.
+		  ///
+		  /// Every reason to decline is established against the files as they are, BEFORE the
+		  /// project is saved. The route does have to save eventually - it cuts a block out of a
+		  /// file and then reloads, so the file must match the IDE first or the reload throws the
+		  /// IDE's newer copy away - but a call that ends in a refusal has no business writing
+		  /// anything, and this one used to: the save ran first and committed whatever the IDE was
+		  /// holding, then the scan declined and the message said nothing had happened.
 
+		  Var dryError As String
+		  Var dryNote As String
+		  Var onDisk As XKProject = ProjectSource.Load(dryError, dryNote, False)
+
+		  Var declarations As Integer = -1
+		  If onDisk <> Nil Then
+		    Var countError As String
+		    declarations = ProjectSource.CountMemberDeclarations(onDisk, itemPath, countError)
+		  End If
+
+		  If declarations = 0 Then
+		    Return MCPKit.ToolResult.Failure("The IDE cannot delete a member on this platform, and the " + _
+		    "project file on disk holds no declaration of " + itemPath + " to remove. Nothing was " + _
+		    "deleted, and no file was touched. If you have only just created it, it exists in the IDE " + _
+		    "and not yet on disk - call save_project first.")
+		  End If
+
+		  If declarations > 1 Then
+		    Return MCPKit.ToolResult.Failure(LastPathComponent(itemPath) + " is declared " + _
+		    declarations.ToString + " times in the project file, and nothing here can tell which one " + _
+		    "you mean. Nothing was deleted, and no file was touched. describe_item lists the " + _
+		    "declarations with their signatures - remove the right #tag block by hand and call " + _
+		    "revert_project.")
+		  End If
+
+		  // Past every check that can decline, so writing is the intent from here on.
 		  Var loadError As String
 		  Var note As String
 		  Var project As XKProject = ProjectSource.Load(loadError, note)
@@ -157,8 +193,23 @@ Inherits MCPKit.Tool
 
 		  Var editError As String
 		  If Not ProjectSource.RemoveMemberFromFile(project, itemPath, editError) Then
+		    // The count was 1 a moment ago, so the save is the only thing that can have changed the
+		    // answer: the IDE was holding a declaration that is now on disk. That cannot be avoided
+		    // - the route has to save before it writes, and nothing can count what exists only in
+		    // the IDE's memory - but it can be said out loud, because the caller's pending changes
+		    // have just become permanent and nothing else would tell them.
+		    Var afterSave As String = ""
+		    Var recountError As String
+		    Var after As Integer = ProjectSource.CountMemberDeclarations(project, itemPath, recountError)
+		    If after > declarations Then
+		      afterSave = " No file was edited to delete anything. The project WAS saved first, as this " + _
+		      "route requires, and that save took the file from " + declarations.ToString + _
+		      " declaration to " + after.ToString + " - so the IDE was holding one that is now written " + _
+		      "to disk, and revert_project no longer undoes it."
+		    End If
+
 		    Return MCPKit.ToolResult.Failure("The IDE cannot delete a member on this platform, and " + _
-		    "editing the file directly did not work: " + editError + " Nothing was deleted.")
+		    "editing the file directly did not work: " + editError + " Nothing was deleted." + afterSave)
 		  End If
 
 		  // The member is gone from disk but the IDE still holds it. Reload, or the next save

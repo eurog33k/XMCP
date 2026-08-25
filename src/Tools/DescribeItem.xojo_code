@@ -3,7 +3,7 @@ Protected Class DescribeItem
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("describe_item", "Lists what a class, module, window or interface contains: every method with its full signature, plus properties, computed properties, constants, enums, event implementations and notes. This is the only way to enumerate a class's members - IDE scripting cannot do it, which is why list_project_items returns nothing for a class - and the only way to see that a method is overloaded, since a dot path carries no signature. Pass a member path instead of a container path to get every overload of that name and its code. Reads the project FILES, so it saves the project first; needs a Text or XML format project, not binary.")
+		  Super.Constructor("describe_item", "Lists what a class, module, window or interface contains: every method with its full signature, plus properties, computed properties, constants, enums, event implementations and notes. This is the only way to enumerate a class's members - IDE scripting cannot do it, which is why list_project_items returns nothing for a class - and the only way to see that a method is overloaded, since a dot path carries no signature. Pass a member path instead of a container path to get every overload of that name and its code. Reads the project FILES as they stand on disk - it does NOT save first, so anything the IDE is holding unsaved will not appear, including an item deleted in the IDE but not yet saved. Call save_project if you need the files to match, bearing in mind that a save makes such a delete permanent. Needs a Text or XML format project, not binary.")
 
 		  Parameters.Add(New MCPKit.ToolParameter("location", MCPKit.ToolParameterTypes.String_, _
 		  "Dot-separated path to a container ('IDECommunicator', 'Window1') or to a member ('Module1.GetFileExtention', 'Window1.Button1.Pressed'). Folder names are not part of the path.", _
@@ -35,7 +35,7 @@ Inherits MCPKit.Tool
 
 		  Var errorMessage As String
 		  Var note As String
-		  Var project As XKProject = ProjectSource.Load(errorMessage, note)
+		  Var project As XKProject = ProjectSource.Load(errorMessage, note, False)
 		  If project = Nil Then
 		    Return MCPKit.ToolResult.Failure(errorMessage)
 		  End If

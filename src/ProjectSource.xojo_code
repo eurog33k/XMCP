@@ -62,9 +62,7 @@ Protected Module ProjectSource
 		  If events.Count > 0 Then
 		    out.Add("Event implementations (" + events.Count.ToString + "):")
 		    For Each ev As XKEvent In events
-		      Var label As String = ev.Name
-		      If ev.ControlName <> "" Then label = ev.ControlName + "." + ev.Name
-		      out.Add("  " + label)
+		      out.Add("  " + EventSignature(ev, ev.ControlName))
 		    Next ev
 		  End If
 
@@ -120,7 +118,7 @@ Protected Module ProjectSource
 		  If events.Count > 0 Then
 		    out.Add("Window event handlers (" + events.Count.ToString + "):")
 		    For Each ev As XKEvent In events
-		      out.Add("  " + ev.Name + If(ev.ReturnType = "", "", " As " + ev.ReturnType))
+		      out.Add("  " + EventSignature(ev, ""))
 		    Next ev
 		  End If
 
@@ -129,8 +127,7 @@ Protected Module ProjectSource
 		    out.Add("Control event handlers:")
 		    For Each g As XKControlEventGroup In groups
 		      For Each ev As XKEvent In g.Events
-		        out.Add("  " + g.ControlName + "." + ev.Name + _
-		        If(ev.ReturnType = "", "", " As " + ev.ReturnType))
+		        out.Add("  " + EventSignature(ev, g.ControlName))
 		      Next ev
 		    Next g
 		  End If
@@ -313,8 +310,10 @@ Protected Module ProjectSource
 		    "older format. The files below are whatever was last written to disk, which may be behind " + _
 		    "the IDE."
 		  ElseIf Not saveFirst Then
-		    note = "NOT saved first: the caller asked for the files as they are on disk, so they may " + _
-		    "be behind what the IDE holds."
+		    note = "Read from disk WITHOUT saving, so anything the IDE is holding unsaved is not " + _
+		    "reflected here - including an item deleted in the IDE but not yet saved, which still " + _
+		    "appears here. save_project makes the files match, but it also makes such a delete " + _
+		    "permanent."
 		  Else
 		    Call App.IDE.SendAndReceive("DoCommand(""SaveFile"")" + EndOfLine + "Print ""saved""", 30000)
 		    note = "The project was saved to disk first, so these files match the IDE."
@@ -681,8 +680,25 @@ Protected Module ProjectSource
 
 	#tag Method, Flags = &h21
 		Private Function MethodSignature(m As XKMethod) As String
-		  Var params() As String
-		  For Each p As XKParameter In m.Parameters
+		  Var params() As XKParameter = m.Parameters
+		  
+		  Var out As String = m.AccessModifierName + " "
+		  If m.IsShared Then out = out + "Shared "
+		  out = out + If(m.IsFunction, "Function ", "Sub ") + m.Name + _
+		  "(" + ParameterList(params) + ")"
+		  If m.ReturnType <> "" Then out = out + " As " + m.ReturnType
+
+		  Return out.Trim
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function ParameterList(params() As XKParameter) As String
+		  /// The inside of a parameter list, without the brackets.
+		  
+		  Var rendered() As String
+		  For Each p As XKParameter In params
 		    Var text As String = ""
 		    If p.IsByRef Then text = "ByRef "
 		    If p.IsParamArray Then text = "ParamArray "
@@ -691,17 +707,29 @@ Protected Module ProjectSource
 		    If p.IsArray Then text = text + "()"
 		    If p.DataType <> "" Then text = text + " As " + p.DataType
 		    If p.DefaultValue <> "" Then text = text + " = " + p.DefaultValue
-		    params.Add(text)
+		    rendered.Add(text)
 		  Next p
+		  
+		  Return String.FromArray(rendered, ", ")
+		  
+		End Function
+	#tag EndMethod
 
-		  Var out As String = m.AccessModifierName + " "
-		  If m.IsShared Then out = out + "Shared "
-		  out = out + If(m.IsFunction, "Function ", "Sub ") + m.Name + _
-		  "(" + String.FromArray(params, ", ") + ")"
-		  If m.ReturnType <> "" Then out = out + " As " + m.ReturnType
-
-		  Return out.Trim
-
+	#tag Method, Flags = &h21
+		Private Function EventSignature(ev As XKEvent, qualifier As String) As String
+		  /// An event handler with its parameters. These used to print as a bare name, which
+		  /// dropped what the handler actually receives without saying so - UserInterfaceUpdate's
+		  /// data() As Dictionary being the case that showed it up. A caller reading a bare name
+		  /// has no way to know a parameter list was omitted rather than absent.
+		  
+		  Var params() As XKParameter = ev.Parameters
+		  
+		  Var out As String = ev.Name + "(" + ParameterList(params) + ")"
+		  If qualifier <> "" Then out = qualifier + "." + out
+		  If ev.ReturnType <> "" Then out = out + " As " + ev.ReturnType
+		  
+		  Return out
+		  
 		End Function
 	#tag EndMethod
 

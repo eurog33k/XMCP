@@ -79,11 +79,17 @@ Inherits MCPKit.Tool
 	#tag Method, Flags = &h21
 		Private Function MembersFromSource(location As String) As String
 		  /// What the item contains according to the project files, or "" if that cannot be
-		  /// determined. Saves the project first - see ProjectSource.Load.
+		  /// determined.
+		  ///
+		  /// Reads without saving. This used to save first so the files were guaranteed to match
+		  /// the IDE, which quietly made it destructive: a delete the IDE had performed was still
+		  /// undoable with revert_project until something saved, and inspecting the result was
+		  /// the something. A read has no business ending an undo - so it reads what is on disk
+		  /// and says so.
 
 		  Var errorMessage As String
 		  Var note As String
-		  Var project As XKProject = ProjectSource.Load(errorMessage, note)
+		  Var project As XKProject = ProjectSource.Load(errorMessage, note, False)
 		  If project = Nil Then Return ""
 
 		  Var item As XKProjectItem = ProjectSource.FindItem(project, location)

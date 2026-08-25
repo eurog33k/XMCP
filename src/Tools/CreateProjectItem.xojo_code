@@ -9,7 +9,9 @@ Inherits MCPKit.Tool
 		  "The type of item to create. Valid values: NewClass, NewModule, NewMethod, NewProperty, " + _
 		  "NewConstant, NewEvent, NewNote, NewMenuHandler, NewComputedProperty, NewSharedMethod, " + _
 		  "NewSharedProperty, NewEnum, NewStructure, NewDelegate, NewInterface, NewWindow, " + _
-		  "NewContainerControl, NewFolder, AddEventImplementation.", _
+		  "NewContainerControl, NewFolder. AddEventImplementation is documented by Xojo but " + _
+		  "unusable: it never answers and stalls the connection for the full timeout, so it is " + _
+		  "rejected here rather than attempted.", _
 		  False, "", True))
 
 		  Parameters.Add(New MCPKit.ToolParameter("parent_location", MCPKit.ToolParameterTypes.String_, _
@@ -39,7 +41,22 @@ Inherits MCPKit.Tool
 		  Var validTypes() As String = Array("NewClass", "NewModule", "NewMethod", "NewProperty", _
 		  "NewConstant", "NewEvent", "NewNote", "NewMenuHandler", "NewComputedProperty", _
 		  "NewSharedMethod", "NewSharedProperty", "NewEnum", "NewStructure", "NewDelegate", _
-		  "NewInterface", "NewWindow", "NewContainerControl", "NewFolder", "AddEventImplementation")
+		  "NewInterface", "NewWindow", "NewContainerControl", "NewFolder")
+
+		  // Refuse this one by name rather than letting it hang. Verified on Windows 11 with Xojo
+		  // 2026r1.1: DoCommand "AddEventImplementation" returns nothing at all and the pipe sits
+		  // there for the full 10s timeout, after which the IDE recovers and no handler has been
+		  // added. Failing in a fraction of a second with the reason beats a stall that looks like
+		  // a broken connection.
+		  If itemType = "AddEventImplementation" Then
+		    Return MCPKit.ToolResult.Failure("AddEventImplementation is documented by Xojo but does " + _
+		    "not work: it never answers, and waiting for it stalls every other request for the full " + _
+		    "timeout. Nothing was created. To add an event handler, edit the .xojo_window or " + _
+		    ".xojo_code file on disk - the handler goes in a #tag Events block for a control, or a " + _
+		    "#tag Event block for the window or class itself - then call revert_project. This is also " + _
+		    "why describe_item cannot show window-level handlers that do not exist yet: there is no " + _
+		    "scriptable way to create one.")
+		  End If
 
 		  Var isValid As Boolean = False
 		  For Each vt As String In validTypes

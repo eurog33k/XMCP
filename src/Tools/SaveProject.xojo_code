@@ -58,7 +58,12 @@ Inherits MCPKit.Tool
 		    // Keep the shell path for display.
 		  End Try
 
-		  Return MCPKit.ToolResult.Success("Project saved: " + nativePath)
+		  // Not "Project saved": the IDE has no command that reports whether there was anything
+		  // to save, so a second call in a row looks exactly like the first. Claim what is
+		  // actually known - that the files now match the IDE - rather than implying a write.
+		  Return MCPKit.ToolResult.Success("The files on disk now match the IDE: " + nativePath + _
+		  ". The IDE cannot be asked whether it had unsaved changes, so this does not tell you " + _
+		  "whether anything was actually written.")
 
 		End Function
 	#tag EndMethod

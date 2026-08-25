@@ -99,14 +99,17 @@ Inherits MCPKit.Tool
 	#tag Method, Flags = &h21
 		Private Function CodeFromSource(location As String) As String
 		  /// The member's body as it stands in the project files, or "" if it is not found
-		  /// there either. Saves the project first - see ProjectSource.Load.
+		  /// there either.
+		  ///
+		  /// Reads without saving - see MembersFromSource in ListProjectItems for why a read
+		  /// here must not write.
 		  ///
 		  /// Overloads are reported rather than guessed at: if the name resolves to more than
 		  /// one declaration, say so instead of silently returning one of them.
 
 		  Var errorMessage As String
 		  Var note As String
-		  Var project As XKProject = ProjectSource.Load(errorMessage, note)
+		  Var project As XKProject = ProjectSource.Load(errorMessage, note, False)
 		  If project = Nil Then Return ""
 
 		  Var ownerPath As String

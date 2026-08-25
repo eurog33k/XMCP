@@ -149,8 +149,12 @@ Inherits ConsoleApplication
 		  // Add server info.
 		  Var serverInfo As New JSONItem
 		  serverInfo.Value("name") = Self.Name
-		  serverInfo.Value("version") = _
-		  MajorVersion.ToString + "." + MinorVersion.ToString + "." + BugVersion.ToString
+		  // Four components, including the build number. Three was not enough to tell two
+		  // binaries apart: every build of 1.3 announced itself as "1.3.0", so the only way to
+		  // identify what a client was actually running was the file size on disk. The project
+		  // now auto-increments the build number, so this moves with every build.
+		  serverInfo.Value("version") = MajorVersion.ToString + "." + MinorVersion.ToString + _
+		  "." + BugVersion.ToString + "." + NonReleaseVersion.ToString
 		  result.Value("serverInfo") = serverInfo
 		  
 		  response.Value("result") = result
