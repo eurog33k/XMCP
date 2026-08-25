@@ -43,6 +43,23 @@ This is the one thing worth internalising, because most surprises come from gett
                               └───────────────┘
 ```
 
+Some questions only the **files** can answer: what members a class has, a method's signature,
+whether a name is overloaded, and anything inside a `.xojo_window`. IDE scripting exposes none of
+those. `describe_item` reads the files for you, and `get_code` and `list_project_items` fall back to
+them when the IDE draws a blank.
+
+**Anything that reads the files saves the project first.** The IDE offers no way to ask whether it
+has unsaved changes, so writing memory out is the only way to make the two agree. Every such tool
+says so in its output. Two things follow, and the first can cost you work:
+
+- **If you edited a file on disk without reloading, that save overwrites your edit** with the IDE's
+  older copy. Call `revert_project` first. This is the clobber hazard from section 5, now reachable
+  without you asking for a save.
+- **A project written by a newer Xojo than your IDE is never saved** — that would rewrite it in the
+  older format. XMCP skips the save and warns that the files may be behind.
+
+Binary projects can't be read at all; save as Text or XML.
+
 Consequences that matter in daily use:
 
 - `set_code` changes the IDE's copy. The files on disk do not change until something saves.
@@ -75,6 +92,10 @@ you are on; pass one to cross-compile (`19` Windows 64-bit Intel, `9` macOS Univ
 `17` Linux 64-bit Intel — the full table is in the tool's description). "Run it" → `run_project`,
 and `stop_project` to end the debug session.
 
+**Ask what something contains.** "What's in `IDECommunicator`?" → `describe_item` lists every method
+with its signature and scope, plus properties, constants and enums. On a window it also lists the
+control event handlers and the control tree. Pass a member path to see every overload of a name.
+
 **Create a method from scratch.** Three calls, because the IDE separates them: `create_project_item`
 makes an unnamed `Untitled` method, `set_declaration` gives it a name, parameters, return type and
 scope, and `set_code` writes the body. `set_code` alone won't do it — it writes bodies only, so a
@@ -101,9 +122,10 @@ in a script and discards the rest, so print once, at the point whose value you w
 
 | Behaviour | Why | What to do |
 |---|---|---|
-| `list_project_items` on a class returns `{}` | it lists contained *items*, not a class's members | navigate to members by name; you don't need to enumerate them first |
+| `list_project_items` on a class returns `{}` | it lists contained *items*, not a class's members | use `describe_item`, which parses the files; `list_project_items` now falls back to it |
 | `get_code` says *"No code editor is active"* | the current location isn't a code item (a class or folder is selected) | pass an explicit `location` to `get_code` instead of relying on the current selection |
-| Window event handlers are invisible | they live in `.xojo_window`, which IDE scripting doesn't expose | edit the file on disk, then `revert_project` — see [section 5](#5-editing-safely) |
+| Window event handlers are invisible to IDE scripting | they live in `.xojo_window` | `describe_item` lists them and `get_code` reads them, both by parsing the file; to *change* one, edit the file and `revert_project` — see [section 5](#5-editing-safely) |
+| Xojo project formats | Text and XML are readable; binary is not | save as Text or XML — which is what version control wants anyway |
 | `set_code` leaves a trailing blank line, and the IDE re-indents the body | code goes through the code editor, which normalises it | harmless; do not expect a byte-identical round-trip |
 | An overloaded method reads back one version | paths carry no signature, so the IDE returns whichever is declared first in the file | read the `.xojo_code` file on disk when you need to see every overload |
 | A folder path fails to select or delete | IDE scripting cannot select folders at all, though `list_project_items` still lists their contents | act on the items inside, or use the IDE for the folder itself |
@@ -188,7 +210,7 @@ Linux, so write to a log file there instead.
 
 | | macOS | Windows |
 |---|---|---|
-| Tools available | 25 | 24 |
+| Tools available | 26 | 25 |
 | IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (a named pipe — no file exists at that path) |
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | Documentation | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |

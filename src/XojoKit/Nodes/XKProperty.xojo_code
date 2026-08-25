@@ -1,0 +1,208 @@
+#tag Class
+Protected Class XKProperty
+Inherits XKNode
+	#tag Method, Flags = &h0
+		Function AccessModifierName() As String
+		  /// Returns the access modifier flags as a human-readable string (Public, Protected, Private, etc.).
+		  
+		  Select Case Flags
+		  Case &h0
+		    Return "Public"
+		    
+		  Case &h1
+		    Return "Protected"
+		    
+		  Case &h21
+		    Return "Private"
+		    
+		  Else
+		    Return "Unknown (" + Flags.ToString + ")"
+		  End Select
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
+		Sub Constructor(parent As XKNode = Nil)
+		  /// Creates a new property with the specified parent.
+		  
+		  Super.Constructor(parent)
+		End Sub
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
+		Function NodeTypeName() As String
+		  /// Returns the type name of this node.
+		  
+		  Return "Property"
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
+		Function ToDebugString(indent As Integer = 0) As String
+		  /// Returns a debug representation of this node.
+		  
+		  Var prefix As String = ""
+		  For i As Integer = 1 To indent
+		    prefix = prefix + "  "
+		  Next i
+		  
+		  Var result As String = prefix + AccessModifierName + " " + Name + " As " + DataType
+		  
+		  If DefaultValue <> "" Then
+		    result = result + " = " + DefaultValue
+		  End If
+		  
+		  If Description <> "" Then
+		    result = result + "  // " + Description
+		  End If
+		  
+		  Return result
+		End Function
+	#tag EndMethod
+
+
+	#tag Property, Flags = &h0
+		DataType As String
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		DefaultValue As String
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		Description As String
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		Flags As Integer = 0
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		GetAccessor As String
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		IsArray As Boolean = False
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		IsComputed As Boolean = False
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		Name As String
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		SetAccessor As String
+	#tag EndProperty
+
+
+	#tag ViewBehavior
+		#tag ViewProperty
+			Name="Name"
+			Visible=true
+			Group="ID"
+			InitialValue=""
+			Type="String"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="Index"
+			Visible=true
+			Group="ID"
+			InitialValue="-2147483648"
+			Type="Integer"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="Super"
+			Visible=true
+			Group="ID"
+			InitialValue=""
+			Type="String"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="Left"
+			Visible=true
+			Group="Position"
+			InitialValue="0"
+			Type="Integer"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="Top"
+			Visible=true
+			Group="Position"
+			InitialValue="0"
+			Type="Integer"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="Flags"
+			Visible=false
+			Group="Behavior"
+			InitialValue="0"
+			Type="Integer"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="DataType"
+			Visible=false
+			Group="Behavior"
+			InitialValue=""
+			Type="String"
+			EditorType="MultiLineEditor"
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="DefaultValue"
+			Visible=false
+			Group="Behavior"
+			InitialValue=""
+			Type="String"
+			EditorType="MultiLineEditor"
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="Description"
+			Visible=false
+			Group="Behavior"
+			InitialValue=""
+			Type="String"
+			EditorType="MultiLineEditor"
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="IsArray"
+			Visible=false
+			Group="Behavior"
+			InitialValue="False"
+			Type="Boolean"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="GetAccessor"
+			Visible=false
+			Group="Behavior"
+			InitialValue=""
+			Type="String"
+			EditorType="MultiLineEditor"
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="IsComputed"
+			Visible=false
+			Group="Behavior"
+			InitialValue="False"
+			Type="Boolean"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="SetAccessor"
+			Visible=false
+			Group="Behavior"
+			InitialValue=""
+			Type="String"
+			EditorType="MultiLineEditor"
+		#tag EndViewProperty
+	#tag EndViewBehavior
+End Class
+#tag EndClass

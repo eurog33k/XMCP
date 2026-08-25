@@ -6,7 +6,7 @@ This file is automatically loaded as an MCP resource when you connect to XMCP. I
 
 ## What XMCP can do
 
-XMCP gives you direct control over the Xojo IDE via 25 tools (24 on Windows — see *Platform differences* below):
+XMCP gives you direct control over the Xojo IDE via 26 tools (25 on Windows — see *Platform differences* below):
 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
@@ -14,6 +14,7 @@ XMCP gives you direct control over the Xojo IDE via 25 tools (24 on Windows — 
 - **Save**: `save_project` — writes the IDE's in-memory project to disk. Call this after `set_code`, `create_project_item`, `constant_value` or `get_item_description` so your changes reach disk
 - **Create items**: `create_project_item`
 - **Inspect and modify**: `get_item_description`, `constant_value`, `get_project_info`, `revert_project`
+- **Inspect what an item contains**: `describe_item` lists every method with its full signature, plus properties, constants, enums, event implementations and, for a window, its control event handlers and control tree. This reads the project FILES rather than asking the IDE, which is the only way to get any of it
 - **Create a usable method**: `create_project_item` makes an unnamed `Untitled` item, then `set_declaration` gives it a name, parameters, return type and scope, then `set_code` fills in the body. The IDE re-indents whatever `set_code` writes, so a body read back after a save is normalised to IDE style rather than byte-identical to what you sent. All three are needed - `set_code` writes bodies only, so passing a `Function ...` signature line as code just writes it as text. `delete_project_item` removes an item if you created the wrong thing
 - **IDE scripting**: `run_ide_script` (escape hatch for anything not covered)
 - **Documentation**: `search_docs`, `lookup_class`, `list_doc_topics`
@@ -24,11 +25,24 @@ XMCP gives you direct control over the Xojo IDE via 25 tools (24 on Windows — 
 
 ## Known limitations of the IDE scripting API
 
+### 0. Two sources of truth: the IDE, and the files
+
+Most tools ask the IDE, which holds the project in memory. Four things the IDE cannot answer at all - a class's members, a method's signature, whether a name is overloaded, and anything inside a `.xojo_window` - are answered instead by parsing the project files. `describe_item` always does this; `get_code` and `list_project_items` fall back to it when the IDE draws a blank.
+
+**Reading the files means saving first.** The IDE cannot be asked whether it has unsaved changes - no such command exists - so the only way to guarantee the files match memory is to write memory out. Any tool that reads the files therefore issues a save first and says so in its output.
+
+Two consequences worth holding on to:
+
+- **If you have edited a file on disk and not reloaded, that save overwrites your edit** with the IDE's older copy. This is the clobber hazard below, now reachable automatically. Call `revert_project` before anything that reads the files.
+- **No save happens if the project was written by a newer Xojo than the running IDE.** Saving would rewrite it in the older format, so XMCP refuses and tells you the files may be behind the IDE instead.
+
+Binary projects (`.xojo_binary_project`) cannot be read at all - the format is not text. Save as Text or XML, which is what you want for version control anyway.
+
 ### 1. `list_project_items` does not list a class's members
 
 `list_project_items` shows contained project *items* — the classes and modules inside a folder or module — not the methods, properties or events inside a class. Listing a class often returns `{}`.
 
-**Solution**: navigate to members by name instead. `select_project_item`, `get_code`, `set_code`, `set_declaration` and `delete_project_item` all accept a full dot-separated path and reach methods, properties and event implementations:
+**Solution**: `describe_item` lists them, by parsing the files. To act on one, navigate to it by name instead. `select_project_item`, `get_code`, `set_code`, `set_declaration` and `delete_project_item` all accept a full dot-separated path and reach methods, properties and event implementations:
 
 ```
 select_project_item(item_path: "App.Configure")     ✓  → "Selected: App.Configure (Event Implementation)"
@@ -44,6 +58,8 @@ A path that does not exist is reported as `ERROR: Could not navigate to: ...` ra
 **Folders cannot be selected.** IDE scripting has no way to select a folder: `SelectProjectItem` returns False for one and `Location` will not take it, even though `list_project_items` lists its contents perfectly well. So `select_project_item` and `delete_project_item` fail on a folder path - the latter says so specifically rather than claiming the folder does not exist.
 
 **`constant_value` needs a qualified name.** `App.kVersion` works; a bare `kVersion` resolves only against whatever is selected in the Navigator and usually returns nothing. Folder names are not part of the path.
+
+**Overloads: `describe_item` shows them all.** `get_code` still returns whichever the IDE resolves the bare name to, which is the first declared in the file.
 
 **Overloads are the exception.** A name with several signatures - `Module1.GetFileExtention(f As FolderItem)` and `Module1.GetFileExtention(s As String)` - resolves to one of them, with nothing in the result saying which, and there is no way to name a signature. When you know a method is overloaded, read the `.xojo_code` file on disk to see every version.
 

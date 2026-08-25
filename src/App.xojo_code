@@ -39,6 +39,7 @@ Inherits MCPKit.ServerApplication
 		  // Register all MCP tools.
 		  RegisterTools( _
 		  New ListProjectItems, _
+		  New DescribeItem, _
 		  New GetCurrentLocation, _
 		  New SelectProjectItem, _
 		  New GetCode, _
@@ -86,6 +87,7 @@ Inherits MCPKit.ServerApplication
 		    Print("")
 		    Print("  IDE Tools:")
 		    Print("  list_project_items   List child items at a project location")
+		    Print("  describe_item        List a class/module's members and signatures (reads files)")
 		    Print("  get_current_location Get the current Navigator location and type")
 		    Print("  select_project_item  Navigate to a project item by path")
 		    Print("  get_code             Read source code at current/specified location")
@@ -244,7 +246,7 @@ Inherits MCPKit.ServerApplication
 	#tag EndMethod
 
 
-	#tag Constant, Name = kToolCount, Type = Double, Dynamic = False, Default = \"25", Scope = Private
+	#tag Constant, Name = kToolCount, Type = Double, Dynamic = False, Default = \"26", Scope = Private
 	#tag EndConstant
 
 	#tag Property, Flags = &h0, Description = 5061746820746F20586F6A6F20646F63756D656E746174696F6E206469726563746F72792E

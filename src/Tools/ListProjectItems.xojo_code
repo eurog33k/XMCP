@@ -43,12 +43,23 @@ Inherits MCPKit.Tool
 
 		  If response.HasKey("response") Then
 		    Var resp As Variant = response.Value("response")
+		    Var listing As String = ""
 		    If resp.Type = Variant.TypeString Then
-		      Return MCPKit.ToolResult.Success(resp.StringValue)
+		      listing = resp.StringValue
 		    Else
 		      Var respJSON As JSONItem = response.Value("response")
-		      Return MCPKit.ToolResult.Success(respJSON.ToString)
+		      listing = respJSON.ToString
 		    End If
+
+		    // SubLocations enumerates contained project ITEMS, so a class - or a module holding
+		    // only methods - answers with nothing. That is not an empty container; it is a
+		    // question the IDE cannot answer. Fall back to the parsed files, which can.
+		    If location <> "" And IsEmptyListing(listing) Then
+		      Var fallback As String = MembersFromSource(location)
+		      If fallback <> "" Then Return MCPKit.ToolResult.Success(fallback)
+		    End If
+
+		    Return MCPKit.ToolResult.Success(listing)
 		  End If
 
 		  Return MCPKit.ToolResult.Failure("Unexpected response from IDE: " + response.ToString)
@@ -56,6 +67,37 @@ Inherits MCPKit.Tool
 		End Function
 	#tag EndMethod
 
+
+	#tag Method, Flags = &h21
+		Private Function IsEmptyListing(listing As String) As Boolean
+		  Var trimmed As String = listing.Trim
+		  Return trimmed = "" Or trimmed = "{}"
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function MembersFromSource(location As String) As String
+		  /// What the item contains according to the project files, or "" if that cannot be
+		  /// determined. Saves the project first - see ProjectSource.Load.
+
+		  Var errorMessage As String
+		  Var note As String
+		  Var project As XKProject = ProjectSource.Load(errorMessage, note)
+		  If project = Nil Then Return ""
+
+		  Var item As XKProjectItem = ProjectSource.FindItem(project, location)
+		  If item = Nil Then Return ""
+
+		  Var members As String = ProjectSource.DescribeMembers(item)
+		  If members = "" Then Return ""
+
+		  Return "The IDE reports no contained project items here, so this is read from the " + _
+		  "project files instead. " + note + EndOfLine + EndOfLine + members + EndOfLine + EndOfLine + _
+		  "Use describe_item for the same information with more detail."
+
+		End Function
+	#tag EndMethod
 
 	#tag ViewBehavior
 		#tag ViewProperty

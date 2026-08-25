@@ -70,6 +70,11 @@ Protected Module MCPKit
 		  If value.IsArray Then Return MCPKit.ToolParameterTypes.Array_
 		  
 		  If value.Type = Variant.TypeString Then Return MCPKit.ToolParameterTypes.String_
+
+		  // Booleans must be tested before the object fallback below. Without this, JSON true
+		  // and false both fell through to Object_ and every boolean tool parameter was
+		  // rejected as "Expected boolean but received object" - which made them all unusable.
+		  If value.Type = Variant.TypeBoolean Then Return MCPKit.ToolParameterTypes.Boolean_
 		  
 		  If value.IsNumeric Then
 		    If MCPKit.IsInteger(value) Then

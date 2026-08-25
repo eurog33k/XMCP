@@ -77,6 +77,14 @@ Inherits MCPKit.Tool
 		    End If
 
 		    If resp.BeginsWith("ERROR:") Then
+		      // The IDE cannot reach everything: window and container event handlers live in
+		      // .xojo_window files, which IDE scripting does not expose at all. Read them from
+		      // the project files instead, which is the one place they are visible.
+		      If location <> "" Then
+		        Var fromSource As String = CodeFromSource(location)
+		        If fromSource <> "" Then Return MCPKit.ToolResult.Success(fromSource)
+		      End If
+
 		      Return MCPKit.ToolResult.Failure(resp)
 		    End If
 		    Return MCPKit.ToolResult.Success(resp)
@@ -87,6 +95,44 @@ Inherits MCPKit.Tool
 		End Function
 	#tag EndMethod
 
+
+	#tag Method, Flags = &h21
+		Private Function CodeFromSource(location As String) As String
+		  /// The member's body as it stands in the project files, or "" if it is not found
+		  /// there either. Saves the project first - see ProjectSource.Load.
+		  ///
+		  /// Overloads are reported rather than guessed at: if the name resolves to more than
+		  /// one declaration, say so instead of silently returning one of them.
+
+		  Var errorMessage As String
+		  Var note As String
+		  Var project As XKProject = ProjectSource.Load(errorMessage, note)
+		  If project = Nil Then Return ""
+
+		  Var ownerPath As String
+		  Var matches() As Variant = ProjectSource.FindMembers(project, location, ownerPath)
+		  If matches.Count = 0 Then Return ""
+
+		  Var out() As String
+		  out.Add("Read from the project files, because IDE scripting cannot reach this item. " + note)
+		  out.Add("")
+
+		  If matches.Count > 1 Then
+		    out.Add(location + " has " + matches.Count.ToString + " declarations; all are shown. " + _
+		    "Use describe_item for their signatures alone.")
+		    out.Add("")
+		  End If
+
+		  For Each member As Variant In matches
+		    out.Add(ProjectSource.MemberSignature(member))
+		    out.Add(ProjectSource.MemberCode(member))
+		    out.Add("")
+		  Next member
+
+		  Return String.FromArray(out, EndOfLine)
+
+		End Function
+	#tag EndMethod
 
 	#tag ViewBehavior
 		#tag ViewProperty

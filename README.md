@@ -2,7 +2,7 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants direct control over the [Xojo IDE](https://www.xojo.com). Built in Xojo using [MCPKit](https://github.com/gkjpettet/MCPKit) by Garry Pettet.
 
-XMCP connects to the Xojo IDE via its IPC socket and exposes 25 tools (24 on Windows, where `get_system_log` has no equivalent) that let an AI navigate projects, read and write code, build, run and save projects, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
+XMCP connects to the Xojo IDE via its IPC socket and exposes 26 tools (25 on Windows, where `get_system_log` has no equivalent) that let an AI navigate projects, read and write code, build, run and save projects, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
 
 XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP resource. Compatible clients (e.g. Claude Code) fetch it automatically at session start, giving the AI immediate awareness of XMCP's capabilities, known IDE scripting limitations, and fallback strategies — without any extra configuration. You can edit the file to add project-specific notes without rebuilding.
 
@@ -180,6 +180,17 @@ Stops the currently running debug session.
 Saves the current Xojo project to disk (File > Save). The IDE holds changes made by `set_code`, `create_project_item`, `constant_value` and `get_item_description` in memory until saved. Note that `build_project` builds the **in-memory** project, so saving is about getting changes onto disk (for git, for external tools, or for editing files directly), not about making them visible to a build.
 
 *No parameters.*
+
+#### `describe_item`
+
+Lists what a class, module, window or interface contains: every method with its full signature and scope, plus properties, computed properties, constants, enums, event implementations and notes. For a window it also lists control event handlers and the control tree. Pass a member path instead of a container path to get every overload of that name, with code.
+
+This is the only way to get any of it — IDE scripting cannot enumerate a class's members, report a signature, reveal that a name is overloaded, or see inside a `.xojo_window`. It works by parsing the project files with [XojoKit](#acknowledgments), which means it **saves the project first**; see [Reading the project files](#reading-the-project-files).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `location` | String | Yes | Path to a container (`IDECommunicator`, `Window1`) or a member (`Module1.Foo`, `Window1.Button1.Pressed`). |
+| `include_code` | Boolean | No | For a member path, include each match's body. Default: true. |
 
 #### `set_declaration`
 
@@ -382,13 +393,30 @@ Two platform differences matter:
 
 If all attempts fail, the tool returns a detailed connection/timeout error.
 
+### Reading the project files
+
+Four things IDE scripting cannot answer — a class's members, a method's signature, whether a name is overloaded, and anything inside a `.xojo_window` — are answered by parsing the project files instead. `describe_item` always does this; `get_code` and `list_project_items` fall back to it when the IDE returns nothing.
+
+Because those tools read the **files** while every other tool reads the IDE's **memory**, they save the project first. The IDE provides no way to ask whether it has unsaved changes, so writing memory out is the only way to guarantee the two agree. Each such tool reports that it saved.
+
+Two consequences:
+
+- **A pending on-disk edit is lost.** If you have edited a `.xojo_code` file and not called `revert_project`, the save writes the IDE's older copy over it. Reload before using a file-reading tool.
+- **A newer project is never saved.** If the project's `RBProjectVersion` is greater than the running IDE's version, saving would rewrite it in the older format, so XMCP skips the save and warns that the files may be behind the IDE.
+
+| Project format | Readable |
+|---|---|
+| Text (`.xojo_project`) | yes |
+| XML (`.xojo_xml_project`) | yes |
+| Binary (`.xojo_binary_project`) | **no** — not a text format; save as Text or XML |
+
 ### Documentation Auto-Detection
 
 On startup, XMCP scans `SpecialFolder.ApplicationData/Xojo/Xojo/` - `~/Library/Application Support/Xojo/Xojo/` on macOS, `%APPDATA%\Xojo\Xojo\` on Windows - for the newest Xojo version directory that contains `Documentation/llms-full.txt`. This file (along with `llms.txt` and `_sources/*.rst.txt`) is available via **Xojo IDE → Preferences → General → Install Local Documentation** and is intended specifically for LLM consumption.
 
 ## Known Limitations
 
-- **`get_system_log` is macOS-only** — it reads the macOS unified log, which has no equivalent elsewhere. On Windows `System.DebugLog` goes to `OutputDebugString`, visible only to an attached debugger, so the tool is not registered there and XMCP exposes 24 tools instead of 25. Use a file-based `App.UnhandledException` handler with `get_debug_log` instead.
+- **`get_system_log` is macOS-only** — it reads the macOS unified log, which has no equivalent elsewhere. On Windows `System.DebugLog` goes to `OutputDebugString`, visible only to an attached debugger, so the tool is not registered there and XMCP exposes 25 tools instead of 26. Use a file-based `App.UnhandledException` handler with `get_debug_log` instead.
 - **`revert_project` may briefly open an empty project on Windows** — reloading needs `CloseProject(False)` + `OpenFile`, and on Windows closing the last project window quits the IDE. So when the target is the only workspace window open, `NewConsoleProject` creates an empty unsaved one to hold the IDE up, and it is discarded afterwards; you may see a window appear and disappear. When another project is already open, `WindowCount` reports it and nothing extra is created. On both platforms the reload discards unsaved IDE changes and loses open editor tabs, since the project really is closed and reopened.
 - **Do not set `XOJO_AUTOMATION=TRUE` on Windows** — Xojo documents this variable for build automation (it skips the Feedback Crash and Restore Previous Project dialogs), but on Windows the IDE exits immediately after loading a project when it is set. Verified 2026-08-24 with Xojo 2026r1.1: the same `Start-Process` launch keeps the project open with the variable unset or `FALSE`, and shuts the IDE down with it set to `TRUE`. XMCP then reports `No IDE listener` for every tool, because there is no IDE left to talk to.
 - **Linux is untested** — the path resolution in `Platform.xojo_code` covers it, but nothing has been verified on Linux.
@@ -402,6 +430,7 @@ On startup, XMCP scans `SpecialFolder.ApplicationData/Xojo/Xojo/` - `~/Library/A
 ## Acknowledgments
 
 - [MCPKit](https://github.com/gkjpettet/MCPKit) by Garry Pettet — the Xojo MCP framework that XMCP is built on
+- [XojoKit](https://github.com/gkjpettet/xojotool) by Garry Pettet — the Xojo project file parser behind `describe_item`, vendored in `src/XojoKit`
 
 ## License
 
