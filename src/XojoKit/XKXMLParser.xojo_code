@@ -380,6 +380,120 @@ Protected Class XKXMLParser
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h21
+		Private Function ParseExternalCodeBlock(node As XmlNode) As XKProjectItem
+		  /// An ExternalCode block: a reference to an item stored outside the project, carrying no
+		  /// code of its own. Nothing here handled that type, so it fell to the unknown-block
+		  /// branch and was dropped - which is why an XML project reported every external item as
+		  /// not found while list_project_items, which asks the IDE, listed it perfectly well.
+		  ///
+		  /// A binary external uses the identical element names and differs only in what it points
+		  /// at, so one resolver covers both and the file itself decides which reader applies.
+		  
+		  Var name As String = GetChildText(node, "ObjName")
+		  Var partialPath As String = GetChildText(node, "PartialPath")
+		  Var fullPath As String = GetChildText(node, "FullPath")
+		  
+		  Var file As FolderItem = ResolveExternalFile(partialPath, fullPath)
+		  
+		  If file = Nil Then
+		    // Return the item anyway. It exists, and calling it missing is precisely the answer
+		    // that sent readers after the wrong problem; what it lacks is a readable file.
+		    Var missing As New XKProjectItem
+		    missing.Name = name
+		    missing.RelativePath = If(partialPath <> "", partialPath, fullPath)
+		    Return missing
+		  End If
+		  
+		  Var content As String = XKParserUtils.ReadFileContents(file)
+		  
+		  Var parsed As XKProjectItem
+		  If content <> "" Then parsed = ParseExternalItem(content)
+		  
+		  If parsed = Nil Then
+		    // Reachable but unreadable - a binary external is the ordinary case.
+		    Var opaque As New XKProjectItem
+		    opaque.Name = name
+		    opaque.RelativePath = file.NativePath
+		    Return opaque
+		  End If
+		  
+		  // The reference supplies the name the project knows it by; the file supplies its shape.
+		  parsed.Name = name
+		  parsed.RelativePath = file.NativePath
+		  parsed.SourceFile = file.NativePath
+		  
+		  Return parsed
+		  
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function ResolveExternalFile(partialPath As String, fullPath As String) As FolderItem
+		  /// Finds the file an external reference points at.
+		  ///
+		  /// PartialPath first, deliberately. It is relative to the project and so travels with a
+		  /// checkout, while FullPath is absolute and belongs to whichever machine last saved -
+		  /// resolving through it would work there and break everywhere else, which is the exact
+		  /// shape of bug this port has already produced twice. FullPath is only a fallback for a
+		  /// reference that has no relative form.
+		  
+		  If partialPath <> "" Then
+		    Var base As FolderItem = ExternalBaseFolder
+		    If base <> Nil Then
+		      Var f As FolderItem = base
+		      Var normalised As String = partialPath.ReplaceAll("\", "/")
+		      
+		      For Each part As String In normalised.Split("/")
+		        If part = "" Then Continue
+		        If f = Nil Then Exit
+		        
+		        Try
+		          If part = ".." Then
+		            f = f.Parent
+		          Else
+		            f = f.Child(part)
+		          End If
+		        Catch e As RuntimeException
+		          f = Nil
+		        End Try
+		      Next part
+		      
+		      If f <> Nil And f.Exists Then Return f
+		    End If
+		  End If
+		  
+		  If fullPath <> "" Then
+		    Try
+		      Var f As New FolderItem(fullPath, FolderItem.PathModes.Native)
+		      If f <> Nil And f.Exists Then Return f
+		    Catch e As RuntimeException
+		      // Fall through.
+		    End Try
+		  End If
+		  
+		  Return Nil
+		  
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function ExternalBaseFolder() As FolderItem
+		  /// The folder a relative external reference is measured from: the one holding the project.
+		  
+		  If mProjectFilePath = "" Then Return Nil
+		  
+		  Try
+		    Var f As New FolderItem(mProjectFilePath, FolderItem.PathModes.Native)
+		    If f = Nil Then Return Nil
+		    Return f.Parent
+		  Catch e As RuntimeException
+		    Return Nil
+		  End Try
+		  
+		End Function
+	#tag EndMethod
+
 	#tag Method, Flags = &h21, Description = 5061727365732061207369676E676C6520626C6F636B20656C656D656E742E
 		Private Function ParseBlock(node As XmlNode, blockType As String, blockId As Integer) As XKProjectItem
 		  /// Parses a single block element.
@@ -392,6 +506,9 @@ Protected Class XKXMLParser
 		    
 		  Case "Module"
 		    item = ParseModuleBlock(node)
+		    
+		  Case "ExternalCode"
+		    item = ParseExternalCodeBlock(node)
 		    
 		  Case "DesktopWindow", "Window", "DesktopContainer", "ContainerControl"
 		    // The classic spellings as well as the API 2 ones. An unmigrated desktop project
@@ -437,6 +554,22 @@ Protected Class XKXMLParser
 		    item.ParentContainerId = GetChildInteger(node, "ObjContainerID")
 		    item.GUID = "&h" + Hex(blockId)
 		    item.ItemType = blockType
+		    
+		    // "Module" is the wrapper every code container is written in - IsClass and
+		    // IsInterface inside it decide what the item really is - and "ExternalCode" names a
+		    // reference rather than a thing. Reporting the wrapper meant a console App with
+		    // IsClass=1 and Superclass=ConsoleApplication was labelled (Module).
+		    If item IsA XKInterface Then
+		      item.ItemType = "Interface"
+		    ElseIf item IsA XKClass Then
+		      item.ItemType = "Class"
+		    ElseIf item IsA XKModule Then
+		      item.ItemType = "Module"
+		    End If
+		    
+		    // A reference whose file could not be read keeps the block name, and "ExternalCode" is
+		    // Xojo's internal label rather than anything a reader would recognise.
+		    If item.ItemType = "ExternalCode" Then item.ItemType = "External item"
 		  End If
 		  
 		  Return item

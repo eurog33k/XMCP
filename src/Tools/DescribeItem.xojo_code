@@ -51,7 +51,10 @@ Inherits MCPKit.Tool
 
 		    Var members As String = ProjectSource.DescribeMembers(item)
 		    If members = "" Then
-		      out.Add("This item contains no code members.")
+		      // "No members" and "the file behind it could not be read" look identical from here,
+		      // and saying the first when the second is true is how an unreadable external item
+		      // got mistaken for an empty one. Check the file before claiming emptiness.
+		      out.Add(EmptyReason(item))
 		    Else
 		      out.Add(members)
 		    End If
@@ -115,6 +118,41 @@ Inherits MCPKit.Tool
 		  out.Add(note)
 		  Return MCPKit.ToolResult.Success(String.FromArray(out, EndOfLine))
 
+		End Function
+	#tag EndMethod
+
+
+	#tag Method, Flags = &h21
+		Private Function EmptyReason(item As XKProjectItem) As String
+		  /// Why an item shows no members: because it has none, or because whatever holds them
+		  /// could not be read.
+		  
+		  If item.RelativePath = "" Then Return "This item contains no code members."
+		  
+		  Var lower As String = item.RelativePath.Lowercase
+		  
+		  If lower.EndsWith(".xojo_binary_code") Or lower.EndsWith(".xojo_binary_window") Or _
+		    lower.EndsWith(".xojo_binary_menu") Then
+		    Return "This item is stored in Xojo's binary format (" + item.RelativePath + "), which " + _
+		    "cannot be read as text, so its members cannot be listed. In the IDE, right-click the " + _
+		    "item and save it as XML or text to make it readable."
+		  End If
+		  
+		  Var f As FolderItem
+		  Try
+		    f = New FolderItem(item.RelativePath, FolderItem.PathModes.Native)
+		  Catch e As RuntimeException
+		    f = Nil
+		  End Try
+		  
+		  If f = Nil Or Not f.Exists Then
+		    Return "The file this item points at is not there: " + item.RelativePath + ". An " + _
+		    "external item lives outside the project, so it can go missing on a machine that does " + _
+		    "not have it - check it out alongside the project, or re-point the reference in the IDE."
+		  End If
+		  
+		  Return "This item contains no code members."
+		  
 		End Function
 	#tag EndMethod
 
