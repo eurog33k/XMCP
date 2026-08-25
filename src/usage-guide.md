@@ -10,7 +10,7 @@ XMCP gives you direct control over the Xojo IDE via 26 tools (25 on Windows — 
 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
-- **Build and run**: `build_project`, `run_project`, `stop_project` — `stop_project` verifies the app actually exited and terminates it directly if the IDE could not, because the IDE's Kill command does not stop a console debug build
+- **Build and run**: `build_project`, `run_project`, `stop_project` — `stop_project` asks the IDE to stop the app, then looks for a live debug build under the project folder and terminates it directly if the IDE's Kill did not, because Kill does not stop a console debug build. It says which of the two happened, and distinguishes both from having found nothing running
 - **Save**: `save_project` — writes the IDE's in-memory project to disk. Call this after `set_code`, `create_project_item`, `constant_value` or `get_item_description` so your changes reach disk
 - **Create items**: `create_project_item`
 - **Inspect and modify**: `get_item_description`, `constant_value`, `get_project_info`, `revert_project`
@@ -65,7 +65,7 @@ A path that does not exist is reported as `ERROR: Could not navigate to: ...` ra
 
 **Overloads: `describe_item` shows them all.** `get_code` still returns whichever the IDE resolves the bare name to, which is the first declared in the file.
 
-**Overloads are the exception.** A name with several signatures - `Module1.GetFileExtention(f As FolderItem)` and `Module1.GetFileExtention(s As String)` - resolves to one of them, with nothing in the result saying which, and there is no way to name a signature. When you know a method is overloaded, read the `.xojo_code` file on disk to see every version.
+**Overloads are the exception.** A name with several signatures - `Module1.GetFileExtention(f As FolderItem)` and `Module1.GetFileExtention(s As String)` - resolves to one of them, with nothing in the result saying which, and there is no way to name a signature. Call `describe_item` on the member path: it reports every declaration with its signature and code. (This used to say read the `.xojo_code` file by hand, which is what `describe_item` now does for you.)
 
 ### 2. Window event handlers cannot be accessed via IDE tools
 

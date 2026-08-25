@@ -18,13 +18,14 @@ Inherits MCPKit.Tool
 
 		  // Where the debug build lives, so a running one can be recognised. Without it there
 		  // is nothing to check against and the old behaviour is all that is left.
-		  Var projectDir As String = ProjectDirectory
+		  Var projectFolderName As String = ""
+		  Var projectDir As String = ProjectDirectory(projectFolderName)
 
 		  // 1. What was running before? Without this the two outcomes are indistinguishable:
 		  //    "the Kill worked" and "there was nothing to kill" both end with no process, and
 		  //    reporting them in the same words tells the caller nothing about what happened.
 		  Var before() As String
-		  If projectDir <> "" Then before = DebugProcesses(projectDir)
+		  If projectDir <> "" Then before = DebugProcesses(projectDir, projectFolderName)
 
 		  // 2. Ask the IDE. This is the polite route and it is enough for a desktop app.
 		  Call App.IDE.SendAndReceive("DoCommand ""Kill""" + EndOfLine + "Print ""killed""", 20000)
@@ -39,7 +40,7 @@ Inherits MCPKit.Tool
 		  // 3. Did that work? DoCommand "Kill" does stop a desktop app but leaves a CONSOLE debug
 		  //    build running, and it reports nothing either way - which is why this tool used to
 		  //    print "Debug session stopped." whether or not anything had stopped.
-		  Var running() As String = DebugProcesses(projectDir)
+		  Var running() As String = DebugProcesses(projectDir, projectFolderName)
 		  If running.Count = 0 Then
 		    If before.Count = 0 Then
 		      Return MCPKit.ToolResult.Success("Nothing to stop: no debug build of this project was " + _
@@ -67,7 +68,7 @@ Inherits MCPKit.Tool
 		  Next entry
 
 		  Thread.SleepCurrent(1000)
-		  Var stillRunning() As String = DebugProcesses(projectDir)
+		  Var stillRunning() As String = DebugProcesses(projectDir, projectFolderName)
 
 		  If stillRunning.Count = 0 Then
 		    Return MCPKit.ToolResult.Success("The IDE's Kill command did not stop it - that command " + _
@@ -84,12 +85,19 @@ Inherits MCPKit.Tool
 
 
 	#tag Method, Flags = &h21
-		Private Function DebugProcesses(projectDir As String) As String()
+		Private Function DebugProcesses(projectDir As String, projectFolderName As String) As String()
 		  /// Live debug builds of the open project, as "pid|path" entries.
 		  ///
-		  /// Recognised by an executable path that sits under the project folder and carries
-		  /// ".debug" - which is how Xojo names what it builds for a debug run. The process list
-		  /// is filtered here rather than in the shell, so no path ever has to be quoted.
+		  /// Recognised by an executable that sits under the project folder and is named the way
+		  /// Xojo names a debug build. The process list is filtered here rather than in the shell,
+		  /// so no path ever has to be quoted.
+		  ///
+		  /// Both halves of that test used to be wrong on Windows, and the tool reported "nothing
+		  /// was running" for a process confirmed by PID. The naming differs by platform - macOS
+		  /// and Linux produce "AppName.debug", Windows produces "DebugAppName.exe", which
+		  /// contains no ".debug" at all - and the path comparison was case-sensitive against a
+		  /// path that may have arrived in 8.3 form. Measured on Windows 11 with Xojo 2026r1.1:
+		  /// C:\tmptest\browntest6\Debuguseit\Debuguseit.exe was live and matched neither test.
 
 		  Var found() As String
 
@@ -99,11 +107,23 @@ Inherits MCPKit.Tool
 		  Var ownPath As String = ""
 		  If App.ExecutableFile <> Nil Then ownPath = App.ExecutableFile.NativePath
 
+		  Var dirNeedle As String = projectDir.Lowercase
+		  Var nameNeedle As String = projectFolderName.Lowercase
+
 		  For Each line As String In listing.ReplaceLineEndings(Chr(10)).Split(Chr(10))
 		    Var text As String = line.Trim
 		    If text = "" Then Continue
-		    If text.IndexOf(projectDir) < 0 Then Continue
-		    If text.IndexOf(".debug") < 0 Then Continue
+
+		    // Under the project folder - by full path, or by the folder's own name when the two
+		    // sides disagree about 8.3 versus long form.
+		    Var lower As String = text.Lowercase
+		    Var underProject As Boolean = (dirNeedle <> "" And lower.IndexOf(dirNeedle) >= 0)
+		    If Not underProject And nameNeedle <> "" Then
+		      underProject = lower.IndexOf(nameNeedle) >= 0
+		    End If
+		    If Not underProject Then Continue
+
+		    If Not LooksLikeDebugBuild(text) Then Continue
 
 		    // Never target the process answering this request. If XMCP itself is being run from
 		    // the IDE, stopping it would kill the server mid-call.
@@ -122,6 +142,29 @@ Inherits MCPKit.Tool
 
 		  Return found
 
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function LooksLikeDebugBuild(processLine As String) As Boolean
+		  /// Whether this process line names a Xojo debug build, in whichever form this platform
+		  /// produces. macOS and Linux append ".debug" to the app name; Windows prefixes the
+		  /// executable with "Debug" instead, so looking for ".debug" there never matches.
+		  
+		  Var lower As String = processLine.Lowercase
+		  
+		  #If TargetWindows Then
+		    // Test the executable's own name, not the whole line: a project living under a folder
+		    // that happens to contain "debug" should not make every process in it a candidate.
+		    Var parts() As String = lower.Split("\")
+		    If parts.Count = 0 Then Return False
+		    
+		    Var fileName As String = parts(parts.LastIndex)
+		    Return fileName.BeginsWith("debug")
+		  #Else
+		    Return lower.IndexOf(".debug") >= 0
+		  #EndIf
+		  
 		End Function
 	#tag EndMethod
 
@@ -151,8 +194,14 @@ Inherits MCPKit.Tool
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
-		Private Function ProjectDirectory() As String
+		Private Function ProjectDirectory(ByRef folderName As String) As String
 		  /// The folder holding the open project, or "" if it cannot be determined.
+		  ///
+		  /// folderName comes back as the folder's real name. On Windows ProjectShellPath is the
+		  /// 8.3 short form and NativePath can carry that through - "C:\tmptest\BROWNT~1" for
+		  /// "C:\tmptest\browntest6" - while Win32_Process reports long paths, so a filter built
+		  /// from the path alone matches nothing. FolderItem.Name is the real directory entry
+		  /// either way, which gives the match something to fall back on.
 
 		  Var response As JSONItem = App.IDE.SendAndReceive("Print ProjectShellPath")
 		  If response = Nil Or Not response.HasKey("response") Then Return ""
@@ -166,6 +215,7 @@ Inherits MCPKit.Tool
 		  Try
 		    Var manifest As New FolderItem(shellPath, FolderItem.PathModes.Shell)
 		    If manifest = Nil Or manifest.Parent = Nil Then Return ""
+		    folderName = manifest.Parent.Name
 		    Return manifest.Parent.NativePath
 		  Catch e As RuntimeException
 		    Return ""
