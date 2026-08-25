@@ -101,7 +101,7 @@ the process itself if the IDE couldn't (the IDE's Kill command doesn't stop a co
 
 **Ask what something contains.** "What's in `IDECommunicator`?" → `describe_item` lists every method
 with its signature and scope, plus properties, constants and enums. On a window it also lists the
-control event handlers and the control tree. Pass a member path to see every overload of a name.
+control event handlers and the control tree. Pass a member path to see one member on its own - every overload of a method with its code, or a property, constant, enum or note. Naming a control returns the control and its handlers. Whatever the listing shows by name can be asked for by that name.
 
 **Create a method from scratch.** Three calls, because the IDE separates them: `create_project_item`
 makes an unnamed `Untitled` method, `set_declaration` gives it a name, parameters, return type and

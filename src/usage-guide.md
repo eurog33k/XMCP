@@ -67,7 +67,7 @@ A path that does not exist is reported as `ERROR: Could not navigate to: ...` ra
 
 **`constant_value` needs a qualified name.** `App.kVersion` works; a bare `kVersion` resolves only against whatever is selected in the Navigator and usually returns nothing. Folder names are not part of the path.
 
-**Overloads: `describe_item` shows them all.** `get_code` still returns whichever the IDE resolves the bare name to, which is the first declared in the file.
+**`describe_item` reaches every member, not just methods.** A member path returns one member on its own: every overload of a method with its code, or a property, computed property, constant, enum or note. Naming a control returns the control and its handlers. The rule is that anything the container listing prints by name can be asked for by that name. `get_code` is the exception - it goes through the IDE, so for an overloaded name it still returns whichever is declared first.
 
 **Overloads are the exception.** A name with several signatures - `Module1.GetFileExtention(f As FolderItem)` and `Module1.GetFileExtention(s As String)` - resolves to one of them, with nothing in the result saying which, and there is no way to name a signature. Call `describe_item` on the member path: it reports every declaration with its signature and code. (This used to say read the `.xojo_code` file by hand, which is what `describe_item` now does for you.)
 
@@ -77,7 +77,9 @@ Window event handlers (e.g. `Window1.Opening`, `Window1.Close`, `Window1.Resized
 
 **Symptom**: `get_code` or `set_code` returns `ERROR: Could not navigate to: Window1.Opening`
 
-**Solution**: Edit the `.xojo_window` file directly on disk (see fallback workflow below).
+**To read one**: `describe_item` on the window lists every handler with its signature, and a member path returns one on its own - `Window1.Opening`, or `Window1.Timer1.Action` for a control's. It reads the `.xojo_window` file rather than asking the IDE, which is why it can see what `get_code` cannot.
+
+**To write one**: edit the `.xojo_window` file directly on disk and call `revert_project` (see the fallback workflow below). There is no scriptable way to create a handler that does not exist yet - `create_project_item` rejects `AddEventImplementation` because Xojo's command for it never answers.
 
 ### 3. Parallel tool calls are not supported
 

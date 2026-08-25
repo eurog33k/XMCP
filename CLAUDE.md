@@ -41,25 +41,25 @@ There are no automated tests or linting tools; validation happens through Xojo I
 ```
 MCP Client (stdin/stdout JSON-RPC)
     → MCPKit.ServerApplication  (request routing)
-        → Tool.Run()            (each of 23 tools)
+        → Tool.Run()            (each of 26 tools)
             → IDECommunicator   (IPCSocket to Xojo IDE)
                 → Xojo IDE      (executes IDE scripts, returns results)
 ```
 
 ### Key Components
 
-**`App.xojo_code`** — Entry point. Registers all tools in `Configure()` (23 on macOS, 22 elsewhere — `get_system_log` is macOS-only), auto-detects the Xojo documentation path under `SpecialFolder.ApplicationData/Xojo/Xojo/`, initializes `IDECommunicator`. The global `App.IDE` instance is used by all IDE tools.
+**`App.xojo_code`** — Entry point. Registers all tools in `Configure()` (26 on macOS, 25 elsewhere — `get_system_log` is macOS-only). `kToolCount` must be kept in step; it is a literal because the count is reported before `Configure` runs, auto-detects the Xojo documentation path under `SpecialFolder.ApplicationData/Xojo/Xojo/`, initializes `IDECommunicator`. The global `App.IDE` instance is used by all IDE tools.
 
 **`IDECommunicator.xojo_code`** — Handles all IDE socket communication. Uses IDE Communicator Protocol v2 over an `IPCSocket`; candidate paths come from `Platform.IPCSocketPaths`. Messages are NUL-terminated JSON. Sends a `{"protocol": 2}` handshake, then uses tag-based correlation for synchronous request/response. Default timeout is 10 seconds; builds use 120 seconds.
 
 **`MCPKit/`** — The MCP protocol framework (8 classes):
 - `ServerApplication` — JSON-RPC stdin/stdout loop and tool dispatch
-- `Tool` — Base class all 23 tools inherit from
+- `Tool` — Base class all 26 tools inherit from
 - `ToolParameter`, `ToolArgument`, `ToolResult` — Parameter/result types
 - `OptionParser`, `Option`, `OptionException` — CLI argument parsing
 
-**`Tools/`** — 22 tool implementations, each inheriting `MCPKit.Tool` and implementing `Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult`:
-- **17 IDE tools**: list/navigate/read/write project items, build, run, stop, save, create items, run IDE scripts, get project info, revert, get/set item description, get/set constant value, get/set selected text
+**`Tools/`** — 26 tool implementations, each inheriting `MCPKit.Tool` and implementing `Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult`:
+- **20 IDE tools**: list/navigate/read/write project items, build, run, stop, save, revert, create/delete items, set a declaration, describe an item, run IDE scripts, get project info, get/set item description, get/set constant value, get/set selected text
 - **3 documentation tools**: search docs (guides/tutorials), lookup class (API reference), list topics (operate on cached `llms-full.txt` / `llms.txt`)
 - **2 debug tools**: `GetDebugLog` (reads `/tmp/xmcp_debug.log`), `GetSystemLog` (reads macOS unified log via `Shell`)
 - **1 cost tool**: `EstimateRequestCost` (static heuristics, no IDE call)

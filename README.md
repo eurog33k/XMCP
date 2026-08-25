@@ -186,7 +186,7 @@ Saves the current Xojo project to disk (File > Save). The IDE holds changes made
 
 #### `describe_item`
 
-Lists what a class, module, window or interface contains: every method with its full signature and scope, plus properties, computed properties, constants, enums, event implementations and notes. For a window it also lists control event handlers and the control tree. Pass a member path instead of a container path to get every overload of that name, with code.
+Lists what a class, module, window or interface contains: every method with its full signature and scope, plus properties, computed properties, constants, enums, event implementations and notes. For a window it also lists control event handlers and the control tree. Members carry their scope and, for a property, whether it is `Shared` or an array; enum values are listed with the numbers they carry, implicit ones included. Pass a member path instead of a container path to get one member on its own — every overload of a method with its code, or a property, computed property, constant, enum or note. Naming a control returns the control and every handler under it. **Anything the listing shows by name can be asked for by that name.**
 
 This is the only way to get any of it — IDE scripting cannot enumerate a class's members, report a signature, reveal that a name is overloaded, or see inside a `.xojo_window`. It works by parsing the project files with [XojoKit](#acknowledgments), so it reports what is **on disk** — it does not save first; see [Reading the project files](#reading-the-project-files).
 
