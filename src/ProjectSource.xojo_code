@@ -227,6 +227,14 @@ Protected Module ProjectSource
 		      Next ev
 		    Next g
 
+		    // Properties are listed for a window and were not searched, so
+		    // Window1.m_bForceProduction answered "has no member called m_bForceProduction" about a
+		    // property the same window's listing prints. The container branch below gained this one
+		    // build ago and the window branch was not carried with it.
+		    For Each prop As XKProperty In win.Properties
+		      If prop.Name.Lowercase = leaf Then found.Add(prop)
+		    Next prop
+
 		    For Each m As XKMethod In win.Methods
 		      If m.Name.Lowercase = leaf Then found.Add(m)
 		    Next m
@@ -261,6 +269,19 @@ Protected Module ProjectSource
 		    If k.Name.Lowercase = leaf Then found.Add(k)
 		  Next k
 
+		  For Each e As XKEnum In container.Enums
+		    If e.Name.Lowercase = leaf Then found.Add(e)
+		  Next e
+
+		  For Each n As XKNote In container.Notes
+		    If n.Name.Lowercase = leaf Then found.Add(n)
+		  Next n
+
+		  // The invariant this function keeps failing to hold: anything DescribeMembers or
+		  // DescribeWindow prints BY NAME must be findable by that name. Three separate builds have
+		  // each added one collection here after someone hit the gap, so the loops are kept in the
+		  // same order as the display code above them. Adding a collection to either list without
+		  // the other is the bug.
 		  Return found
 
 		End Function
@@ -699,6 +720,24 @@ Protected Module ProjectSource
 		    Var text As String = ScopePrefix(cp.Flags) + cp.Name
 		    If cp.DataType <> "" Then text = text + " As " + cp.DataType
 		    Return text + "  (computed property)"
+		  End If
+
+		  If member IsA XKEnum Then
+		    Var en As XKEnum = XKEnum(member)
+		    Var values() As XKEnumValue = en.Values
+		    
+		    Var names() As String
+		    For Each v As XKEnumValue In values
+		      names.Add(v.Name)
+		    Next v
+		    
+		    Var text As String = ScopePrefix(en.Flags) + en.Name + "  (enum"
+		    If names.Count > 0 Then text = text + ": " + String.FromArray(names, ", ")
+		    Return text + ")"
+		  End If
+
+		  If member IsA XKNote Then
+		    Return XKNote(member).Name + "  (note)"
 		  End If
 
 		  If member IsA XKConstant Then
