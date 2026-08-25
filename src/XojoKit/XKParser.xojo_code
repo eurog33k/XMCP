@@ -1529,6 +1529,15 @@ Protected Class XKParser
 		    End If
 		  Next modifier
 		  
+		  // "Shared" follows the scope keyword on a class property, and it is the only place the
+		  // text format records it - the tag line's Flags do not carry it. Stripping the scope but
+		  // not this left "Shared m_bForceProduction" as the name, so the same fix had to cover
+		  // both keywords or it only moved the problem along by one word.
+		  If declLine.BeginsWith("Shared ") Then
+		    p.IsShared = True
+		    declLine = declLine.Middle(7).Trim
+		  End If
+		  
 		  // Parse: PropertyName As PropertyType [= DefaultValue]
 		  Var asPos As Integer = declLine.IndexOf(" As ")
 		  If asPos < 0 Then

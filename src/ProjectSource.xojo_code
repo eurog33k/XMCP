@@ -30,7 +30,7 @@ Protected Module ProjectSource
 		  If props.Count > 0 Then
 		    out.Add("Properties (" + props.Count.ToString + "):")
 		    For Each p As XKProperty In props
-		      out.Add("  " + ScopePrefix(p.Flags) + p.Name + If(p.DataType = "", "", " As " + p.DataType))
+		      out.Add("  " + PropertyLine(p, False))
 		    Next p
 		  End If
 
@@ -111,7 +111,7 @@ Protected Module ProjectSource
 		  If props.Count > 0 Then
 		    out.Add("Properties (" + props.Count.ToString + "):")
 		    For Each p As XKProperty In props
-		      out.Add("  " + ScopePrefix(p.Flags) + p.Name + If(p.DataType = "", "", " As " + p.DataType))
+		      out.Add("  " + PropertyLine(p, False))
 		    Next p
 		  End If
 
@@ -691,12 +691,7 @@ Protected Module ProjectSource
 		  End If
 
 		  If member IsA XKProperty Then
-		    Var prop As XKProperty = XKProperty(member)
-		    Var text As String = ScopePrefix(prop.Flags) + prop.Name
-		    If prop.IsArray Then text = text + "()"
-		    If prop.DataType <> "" Then text = text + " As " + prop.DataType
-		    If prop.DefaultValue <> "" Then text = text + " = " + prop.DefaultValue
-		    Return text + "  (property)"
+		    Return PropertyLine(XKProperty(member), True) + "  (property)"
 		  End If
 
 		  If member IsA XKComputedProperty Then
@@ -715,6 +710,30 @@ Protected Module ProjectSource
 
 		  Return ""
 
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function PropertyLine(prop As XKProperty, withDefault As Boolean) As String
+		  /// One property, rendered the same way everywhere it appears.
+		  ///
+		  /// withDefault is the one deliberate difference between a container listing and a direct
+		  /// request for the property, and it is a decision rather than an accident: a listing is a
+		  /// summary, and a default value can be long - a base64 blob, a key, a connection string.
+		  /// Asking for the property by name is asking for its detail, so that is where the value
+		  /// belongs. It also keeps values that look like credentials out of output nobody asked
+		  /// for them in.
+		  
+		  Var text As String = ScopePrefix(prop.Flags)
+		  If prop.IsShared Then text = text + "Shared "
+		  
+		  text = text + prop.Name
+		  If prop.IsArray Then text = text + "()"
+		  If prop.DataType <> "" Then text = text + " As " + prop.DataType
+		  If withDefault And prop.DefaultValue <> "" Then text = text + " = " + prop.DefaultValue
+		  
+		  Return text
+		  
 		End Function
 	#tag EndMethod
 

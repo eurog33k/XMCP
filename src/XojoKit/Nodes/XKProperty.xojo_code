@@ -86,6 +86,10 @@ Inherits XKNode
 	#tag EndProperty
 
 	#tag Property, Flags = &h0
+		IsShared As Boolean = False
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
 		IsComputed As Boolean = False
 	#tag EndProperty
 

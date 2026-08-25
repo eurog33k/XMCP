@@ -1278,6 +1278,15 @@ Protected Class XKXMLParser
 		  Var p As New XKProperty
 		  p.Name = GetChildText(node, "ItemName")
 		  p.Flags = GetItemFlags(node)
+		  p.IsShared = GetChildBoolean(node, "IsShared")
+		  
+		  // ItemName carries the array marker - "profileStack()" - and so does the declaration.
+		  // Neither was reaching the output, so an array property read as a scalar: a caller was
+		  // told profileStack holds one TUProfileData rather than a list of them.
+		  If p.Name.IndexOf("()") >= 0 Then
+		    p.IsArray = True
+		    p.Name = p.Name.ReplaceAll("()", "")
+		  End If
 		  
 		  // Get description.
 		  For i As Integer = 0 To node.ChildCount - 1
