@@ -1006,6 +1006,63 @@ Protected Class XKXMLParser
 		End Sub
 	#tag EndMethod
 
+	#tag Method, Flags = &h21
+		Private Function ParseEnumBlock(node As XmlNode) As XKEnum
+		  /// A class or module enum. Nothing here parsed one at all, so an enum in an XML item was
+		  /// dropped entirely rather than merely arriving without its values.
+		  ///
+		  /// <Enumeration> is used for two different things and they have to be told apart by what
+		  /// they contain. A real enum carries <ItemName> and an <ItemSource> of <SourceLine>
+		  /// values, the same shape a method uses. The inspector's allowed-value list for a
+		  /// property - <EditorType>Enum</EditorType> inside a <ViewProperty> - carries <ItemDef>
+		  /// entries instead and is not a member at all, so it is left alone.
+		  
+		  Var name As String = GetChildText(node, "ItemName")
+		  If name = "" Then Return Nil
+		  
+		  Var en As New XKEnum
+		  en.Name = name
+		  en.Flags = GetItemFlags(node)
+		  en.DataType = GetChildText(node, "ItemType")
+		  
+		  For i As Integer = 0 To node.ChildCount - 1
+		    Var child As XmlNode = node.Child(i)
+		    If Not (child IsA XmlElement) Then Continue
+		    If XmlElement(child).Name <> "ItemSource" Then Continue
+		    
+		    // Values are bare names unless someone pinned a number, exactly as in the text format,
+		    // so an unwritten one takes the ordinal Xojo would give it.
+		    Var nextImplicit As Integer = 0
+		    
+		    For Each line As String In ExtractSourceLines(child)
+		      Var trimmed As String = line.Trim
+		      If trimmed = "" Then Continue
+		      
+		      Var ev As New XKEnumValue
+		      Var eqPos As Integer = trimmed.IndexOf(" = ")
+		      
+		      If eqPos >= 0 Then
+		        ev.Name = trimmed.Left(eqPos).Trim
+		        Var valueStr As String = trimmed.Middle(eqPos + 3).Trim
+		        ev.Value = Val(valueStr)
+		        nextImplicit = ev.Value + 1
+		      Else
+		        ev.Name = trimmed
+		        ev.Value = nextImplicit
+		        nextImplicit = nextImplicit + 1
+		      End If
+		      
+		      If ev.Name <> "" Then en.AddValue(ev)
+		    Next line
+		    
+		    Exit
+		  Next i
+		  
+		  Return en
+		  
+		End Function
+	#tag EndMethod
+
 	#tag Method, Flags = &h21, Description = 5061727365732061204D6F64756C6520626C6F636B2C2077686963682063616E20626520612043616C73732C204D6F64756C652C206F7220496E746572666163652E
 		Private Function ParseModuleBlock(node As XmlNode) As XKCodeContainer
 		  /// Parses a Module block, which can be a Class, Module, or Interface.
@@ -1066,6 +1123,10 @@ Protected Class XKXMLParser
 		    Case "Constant"
 		      Var c As XKConstant = ParseConstant(child)
 		      If c <> Nil Then container.AddConstant(c)
+		      
+		    Case "Enumeration"
+		      Var en As XKEnum = ParseEnumBlock(child)
+		      If en <> Nil Then container.AddEnum(en)
 		      
 		    Case "Note"
 		      Var n As XKNote = ParseNote(child)
