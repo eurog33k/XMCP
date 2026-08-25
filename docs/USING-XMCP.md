@@ -48,13 +48,15 @@ whether a name is overloaded, and anything inside a `.xojo_window`. IDE scriptin
 those. `describe_item` reads the files for you, and `get_code` and `list_project_items` fall back to
 them when the IDE draws a blank.
 
-**Anything that reads the files saves the project first.** The IDE offers no way to ask whether it
-has unsaved changes, so writing memory out is the only way to make the two agree. Every such tool
-says so in its output. Two things follow, and the first can cost you work:
+**Anything that reads the files reports what is on disk, and does not save first.** These tools used
+to save, on the reasoning that the IDE offers no way to ask whether it has unsaved changes. That made
+reading destructive: a member deleted through the IDE stays undoable with `revert_project` until
+something saves, and checking the delete was the something. A read should not end an undo. Every such
+tool says in its output that it read without saving. Two things follow:
 
-- **If you edited a file on disk without reloading, that save overwrites your edit** with the IDE's
-  older copy. Call `revert_project` first. This is the clobber hazard from section 5, now reachable
-  without you asking for a save.
+- **What the IDE holds unsaved will not appear** - and something deleted in the IDE but not saved
+  will still appear. Call `save_project` if you need them to match, remembering that the save is
+  what makes an IDE-side delete permanent.
 - **The first IDE save after you hand-edit a file rewrites it in the IDE's format** — methods
   reordered alphabetically, indentation normalised, the standard `#tag ViewProperty` block added.
   The code is unchanged, but the diff is large the first time and empty thereafter. Worth committing

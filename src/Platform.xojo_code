@@ -130,7 +130,9 @@ Protected Module Platform
 		  /// Only candidate FOLDERS are probed for writability - never the socket path
 		  /// itself. On Windows an IPCSocket endpoint has no filesystem entry, so
 		  /// FolderItem.Exists on the socket path is always False even while the IDE is
-		  /// listening. Verified 2026-08-21 on Windows 11 with Xojo 2021r3.1: the
+		  /// listening. Verified 2026-08-21 on Windows 11 (the IDE version was recorded here as
+		  /// 2021r3.1, which every later record from that machine contradicts - it reports
+		  /// 2026r1.1 - so the figure is left out rather than guessed at): the
 		  /// shipped IDECommunicator example resolves and connects to
 		  /// C:\Users\<user>\AppData\Local\Temp\XojoIDE, while `dir` on that exact path
 		  /// reports "File Not Found".

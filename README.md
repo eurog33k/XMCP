@@ -187,7 +187,7 @@ Saves the current Xojo project to disk (File > Save). The IDE holds changes made
 
 Lists what a class, module, window or interface contains: every method with its full signature and scope, plus properties, computed properties, constants, enums, event implementations and notes. For a window it also lists control event handlers and the control tree. Pass a member path instead of a container path to get every overload of that name, with code.
 
-This is the only way to get any of it — IDE scripting cannot enumerate a class's members, report a signature, reveal that a name is overloaded, or see inside a `.xojo_window`. It works by parsing the project files with [XojoKit](#acknowledgments), which means it **saves the project first**; see [Reading the project files](#reading-the-project-files).
+This is the only way to get any of it — IDE scripting cannot enumerate a class's members, report a signature, reveal that a name is overloaded, or see inside a `.xojo_window`. It works by parsing the project files with [XojoKit](#acknowledgments), so it reports what is **on disk** — it does not save first; see [Reading the project files](#reading-the-project-files).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -227,7 +227,7 @@ Creates a new project item in the Xojo IDE.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `item_type` | String | Yes | One of: `NewClass`, `NewModule`, `NewMethod`, `NewProperty`, `NewConstant`, `NewEvent`, `NewNote`, `NewMenuHandler`, `NewComputedProperty`, `NewSharedMethod`, `NewSharedProperty`, `NewEnum`, `NewStructure`, `NewDelegate`, `NewInterface`, `NewWindow`, `NewContainerControl`, `NewFolder`, `AddEventImplementation`. |
+| `item_type` | String | Yes | One of: `NewClass`, `NewModule`, `NewMethod`, `NewProperty`, `NewConstant`, `NewEvent`, `NewNote`, `NewMenuHandler`, `NewComputedProperty`, `NewSharedMethod`, `NewSharedProperty`, `NewEnum`, `NewStructure`, `NewDelegate`, `NewInterface`, `NewWindow`, `NewContainerControl`, `NewFolder`. `AddEventImplementation` is documented by Xojo but rejected here — see [Known Limitations](#known-limitations). |
 | `parent_location` | String | No | Dot-separated path to navigate to before creating the item (e.g. `Module1`). |
 
 #### `run_ide_script`
@@ -401,12 +401,14 @@ If all attempts fail, the tool returns a detailed connection/timeout error.
 
 Four things IDE scripting cannot answer — a class's members, a method's signature, whether a name is overloaded, and anything inside a `.xojo_window` — are answered by parsing the project files instead. `describe_item` always does this; `get_code` and `list_project_items` fall back to it when the IDE returns nothing.
 
-Because those tools read the **files** while every other tool reads the IDE's **memory**, they save the project first. The IDE provides no way to ask whether it has unsaved changes, so writing memory out is the only way to guarantee the two agree. Each such tool reports that it saved.
+Those tools read the **files** while every other tool reads the IDE's **memory**, so the two can disagree. They report what is on disk and **do not save first** — each says so in its output.
+
+That is a deliberate reversal. They used to save, on the reasoning that the IDE offers no way to ask whether it has unsaved changes, so writing memory out was the only way to guarantee the two agreed. It also made reading destructive: a member deleted through the IDE stays undoable with `revert_project` until something saves, and inspecting the result was the something. A tool that told you the delete was reversible handed you a verification step that made it permanent. A read should not end an undo.
 
 Two consequences:
 
-- **A pending on-disk edit is lost.** If you have edited a `.xojo_code` file and not called `revert_project`, the save writes the IDE's older copy over it. Reload before using a file-reading tool.
-- **A newer project is never saved.** If the project's `RBProjectVersion` is greater than the running IDE's version, saving would rewrite it in the older format, so XMCP skips the save and warns that the files may be behind the IDE.
+- **What the IDE holds unsaved is not shown.** An item created or deleted in the IDE but not yet saved will be missing or still present. Call `save_project` if you need the files to match — bearing in mind that a save is exactly what makes an IDE-side delete permanent.
+- **A newer project is never saved either way.** If the project's `RBProjectVersion` is greater than the running IDE's version, saving would rewrite it in the older format, so XMCP refuses and says the files may be behind the IDE.
 
 | Project format | Readable |
 |---|---|
@@ -419,6 +421,8 @@ Two consequences:
 On startup, XMCP scans `SpecialFolder.ApplicationData/Xojo/Xojo/` - `~/Library/Application Support/Xojo/Xojo/` on macOS, `%APPDATA%\Xojo\Xojo\` on Windows - for the newest Xojo version directory that contains `Documentation/llms-full.txt`. This file (along with `llms.txt` and `_sources/*.rst.txt`) is available via **Xojo IDE → Preferences → General → Install Local Documentation** and is intended specifically for LLM consumption.
 
 ## Known Limitations
+
+- **`create_project_item` rejects `AddEventImplementation`** — Xojo documents the command, but it never answers and blocks the connection for the full timeout, after which no handler has been added. Verified 2026-08-25 on Windows 11 with Xojo 2026r1.1. XMCP refuses it immediately with the reason rather than hanging. To add an event handler, edit the `.xojo_window` or `.xojo_code` file on disk — a `#tag Events` block for a control, a `#tag Event` block for the window or class itself — and call `revert_project`. This is also why a window-level handler that does not exist yet cannot be created through XMCP at all.
 
 - **`get_system_log` is macOS-only** — it reads the macOS unified log, which has no equivalent elsewhere. On Windows `System.DebugLog` goes to `OutputDebugString`, visible only to an attached debugger, so the tool is not registered there and XMCP exposes 25 tools instead of 26. Use a file-based `App.UnhandledException` handler with `get_debug_log` instead.
 - **`revert_project` may briefly open an empty project on Windows** — reloading needs `CloseProject(False)` + `OpenFile`, and on Windows closing the last project window quits the IDE. So when the target is the only workspace window open, `NewConsoleProject` creates an empty unsaved one to hold the IDE up, and it is discarded afterwards; you may see a window appear and disappear. When another project is already open, `WindowCount` reports it and nothing extra is created. On both platforms the reload discards unsaved IDE changes and loses open editor tabs, since the project really is closed and reopened.

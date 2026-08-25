@@ -4,6 +4,19 @@ All notable changes to XMCP will be documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **A refused member delete could damage the source file, and reported that it had not.** `DoCommand("DeleteSelection")` is documented as not implemented off macOS, which was read as *does nothing*; on Windows it edits the **text at the caret**. The member path focused the editor, sent it, saw the member still present, and fell through to the file route — whose save then committed the caret damage to disk before the ambiguity check declined to touch anything. Measured on Windows 11 with Xojo 2026r1.1: a character vanished from the body of the focused method, only `build_project` noticed (nothing else reads method bodies), and the message said `Nothing was deleted`. `DeleteSelection` is now sent on macOS and nowhere else. The same silent guess was reachable on macOS by a different route — there it removes whichever overload the editor resolved to, the name stays reachable through the other declaration, so the tool concludes failure and falls through to the file route, whose save commits that removal and whose scan then finds one declaration left and cuts it too. Both routes now establish the declaration count before anything is touched, and the scan never writes, so a refusal leaves the file byte for byte as it was
+- **Reading the project files no longer saves them.** Every file-reading tool saved first, which made `revert_project restores it` a promise no such tool could keep: a member deleted through the IDE stays undoable until something saves, and inspecting the result was the something. `describe_item`, `list_project_items` and `get_code`'s fallback now report what is on disk and say so. The trade is stated where it matters — an unsaved delete still appears until you save
+- **The file route's refusal wrote before it declined.** `delete_project_item`'s fall-through saved, then scanned, then refused. Measured on Windows: a call reporting `Nothing was deleted` took the file from one declaration to two, committing pending IDE state the caller could still have discarded. Every reason to decline is now established against the files as they are; the save happens only once writing is the intent. It cannot be removed entirely — the route cuts a block out of a file and reloads, so the file must match the IDE first — so when that save is what changes the answer, the refusal says so
+- **`stop_project` described both outcomes in the same words.** It now counts what was running before the Kill, so "stopped a debug session" and "there was nothing to stop" are distinguishable
+- **`save_project` implied a write that may not have happened.** The IDE has no command reporting whether it had unsaved changes, so the message now claims only what is known: the files on disk match the IDE
+- **`select_project_item` gave a folder the method-level explanation** — and a workaround (`get_code`) that cannot apply to one. It now works out which condition it hit
+- **Event handlers printed as bare names** in all three places that list them, dropping their parameters without saying so; `UserInterfaceUpdate(data() As Dictionary)` appeared as `UserInterfaceUpdate`
+- **`create_project_item` rejects `AddEventImplementation`** instead of stalling. Xojo documents it; it never answers and blocks the connection for the full timeout, after which nothing has been created. The refusal names the file-editing route to an event handler instead
+
+### Changed
+- **The version identifies the build.** `NonRelease` is stamped from the commit count and the MCP handshake reports four components (`1.3.0.34`), so two binaries can be told apart without comparing file sizes
+
 ## [1.3.0] - 2026-08-24
 
 ### Added

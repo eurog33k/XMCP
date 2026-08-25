@@ -29,13 +29,14 @@ XMCP gives you direct control over the Xojo IDE via 26 tools (25 on Windows — 
 
 Most tools ask the IDE, which holds the project in memory. Four things the IDE cannot answer at all - a class's members, a method's signature, whether a name is overloaded, and anything inside a `.xojo_window` - are answered instead by parsing the project files. `describe_item` always does this; `get_code` and `list_project_items` fall back to it when the IDE draws a blank.
 
-**Reading the files means saving first.** The IDE cannot be asked whether it has unsaved changes - no such command exists - so the only way to guarantee the files match memory is to write memory out. Any tool that reads the files therefore issues a save first and says so in its output.
+**Reading the files does NOT save first.** These tools report what is on disk, and say so in their output. They used to save - the IDE cannot be asked whether it has unsaved changes, so writing memory out was the only way to make the two agree - but that made reading destructive: an item deleted through the IDE is undoable with `revert_project` until something saves, and checking the result was the something. Reading no longer ends an undo.
 
-Three consequences worth holding on to:
+Consequences worth holding on to:
 
-- **If you have edited a file on disk and not reloaded, that save overwrites your edit** with the IDE's older copy. This is the clobber hazard below, now reachable automatically. Call `revert_project` before anything that reads the files.
+- **Unsaved IDE state is invisible here.** An item you created in the IDE but have not saved will not appear; one you deleted will still appear. Call `save_project` if you need the files to match - remembering that the save is what makes an IDE-side delete permanent.
 - **The first IDE save after hand-editing a file rewrites that file in the IDE's own format**: methods reordered alphabetically, indentation normalised, and the standard `#tag ViewProperty` block filled in. Nothing is lost - it is the same code - but expect a large diff the first time, and none afterwards.
 - **No save happens if the project was written by a newer Xojo than the running IDE.** Saving would rewrite it in the older format, so XMCP refuses and tells you the files may be behind the IDE instead.
+- **`delete_project_item`'s file route is the one place a save still happens.** It has to: it cuts a block out of a file and reloads, so the file must match the IDE first. Every reason to refuse is checked before that save, so a refusal writes nothing - and if the save itself changes the answer, the message says so.
 
 Binary projects (`.xojo_binary_project`) cannot be read at all - the format is not text. Save as Text or XML, which is what you want for version control anyway.
 

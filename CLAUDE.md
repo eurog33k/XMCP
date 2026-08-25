@@ -15,6 +15,12 @@ This is a **Xojo native application** — there is no Makefile, npm, or shell-ba
 - **Output**: `src/Builds - XMCP/XMCP` (macOS binary)
 - **Alternatively**: Use the `mcp__xmcp__build_project` MCP tool if XMCP itself is running
 
+**Leave `build_type` off for a host-platform build** — it resolves to the right macOS target on its own. Passing a number is only for cross-building (`19` for Windows 64-bit); passing the wrong one silently produces a single-architecture binary where a Universal one is installed.
+
+**Stamp the build number before a build anyone else will run.** Set `NonRelease` in `src/XMCP.xojo_project` to `git rev-list --count HEAD`, then `revert_project` and build. The MCP handshake reports `Major.Minor.Sub.NonRelease`, so that number is what identifies a binary — without it every build of 1.3 announces itself as `1.3.0` and the only way to tell two apart is the file size on disk, which has already caused real confusion. The stamp names the commit it was built from, so it lags HEAD by the stamping commit itself. Xojo's own `AutoIncrementVersionInformation` does not work here: the counter lives in the manifest only once saved, and every `revert_project` resets it, so every build came out `.1`.
+
+**A build only reaches a client on restart.** Building writes the binary; the client keeps running the old one until its session restarts. Deploying means build → copy the binary *and* `usage-guide.md` → restart the client.
+
 There are no automated tests or linting tools; validation happens through Xojo IDE's built-in compiler and manual integration testing with an MCP client.
 
 ## Architecture
