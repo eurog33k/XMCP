@@ -346,13 +346,16 @@ Protected Class XKXMLParser
 		  Case "Module"
 		    item = ParseModuleBlock(node)
 		    
-		  Case "DesktopWindow"
+		  Case "DesktopWindow", "Window", "DesktopContainer", "ContainerControl"
+		    // The classic spellings as well as the API 2 ones. An unmigrated desktop project
+		    // saved as XML says Window and ContainerControl, and matching only DesktopWindow
+		    // left those projects with no windows at all - the same gap the text parser had.
 		    item = ParseWindowBlock(node)
 		    
 		  Case "Menu"
 		    item = ParseMenuBlock(node)
 		    
-		  Case "DesktopToolbar"
+		  Case "DesktopToolbar", "Toolbar"
 		    item = ParseToolbarBlock(node)
 		    
 		  Case "FileTypes"

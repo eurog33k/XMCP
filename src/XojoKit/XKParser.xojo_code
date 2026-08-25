@@ -78,9 +78,14 @@ Protected Class XKParser
 		Private Function IsItemType(key As String) As Boolean
 		  /// Returns True if the key is a project item type.
 		  
+		  // The classic spellings matter as much as the API 2 ones. A desktop project that has
+		  // not been migrated writes Window, ContainerControl and Toolbar, and this gate decided
+		  // whether the line was an item at all - so those projects had no windows, which
+		  // describe_item reported as "No item or member found".
 		  Select Case key
-		  Case "Folder", "Class", "Module", "Interface", "DesktopWindow", "MenuBar", _
-		    "DesktopToolbar", "MultiImage", "FileTypeSet", "BuildSteps", "WebSession", "WebView"
+		  Case "Folder", "Class", "Module", "Interface", "MenuBar", "MultiImage", "FileTypeSet", _
+		    "BuildSteps", "WebSession", "WebView", "DesktopWindow", "Window", "DesktopContainer", _
+		    "ContainerControl", "DesktopToolbar", "Toolbar"
 		    Return True
 		  Else
 		    Return False
@@ -886,11 +891,18 @@ Protected Class XKParser
 		    item = New XKModule
 		  Case "Interface"
 		    item = New XKInterface
-		  Case "DesktopWindow"
+		  Case "DesktopWindow", "Window"
+		    // "Window" and "ContainerControl" are what the IDE writes for a classic desktop
+		    // project - only API 2 projects say "DesktopWindow". Without them a window was
+		    // parsed as a generic item with no members, so describe_item answered "No item or
+		    // member found" for a window that plainly exists. Measured on macOS with Xojo
+		    // 2025r3.1 against a window the IDE had just created.
+		    item = New XKWindow
+		  Case "ContainerControl", "DesktopContainer"
 		    item = New XKWindow
 		  Case "MenuBar"
 		    item = New XKMenuBar
-		  Case "DesktopToolbar"
+		  Case "DesktopToolbar", "Toolbar"
 		    item = New XKToolbar
 		  Case "MultiImage"
 		    item = New XKMultiImage
@@ -1714,6 +1726,20 @@ Protected Class XKParser
 		End Sub
 	#tag EndMethod
 
+	#tag Method, Flags = &h21
+		Private Function IsLayoutEndTag(line As String) As Boolean
+		  /// Whether this line closes a window or container visual layout, in either the classic
+		  /// or the API 2 spelling. Compared exactly rather than by prefix, so #tag EndWindowCode
+		  /// cannot be mistaken for #tag EndWindow.
+		  
+		  Var trimmed As String = line.Trim
+		  
+		  Return trimmed = "#tag EndDesktopWindow" Or trimmed = "#tag EndWindow" Or _
+		  trimmed = "#tag EndDesktopContainer" Or trimmed = "#tag EndContainerControl"
+		  
+		End Function
+	#tag EndMethod
+
 	#tag Method, Flags = &h21, Description = 5061727365732061202E786F6A6F5F77696E646F772066696C652E
 		Private Sub ParseWindowFile(window As XKWindow, content As String, filePath As String)
 		  /// Parses a .xojo_window file.
@@ -1727,25 +1753,28 @@ Protected Class XKParser
 		  Var totalLines As Integer = lines.Count
 		  Var inVisualLayout As Boolean = False
 		  
-		  // Skip to the Begin DesktopWindow or Begin DesktopContainer line.
+		  // Skip to the line that opens the visual layout. Classic desktop projects write
+		  // "Begin Window" and "Begin ContainerControl"; only API 2 says "Begin DesktopWindow".
+		  // Matching just the API 2 spelling meant this loop ran off the end of a classic file,
+		  // so nothing at all was parsed from it - no events, no methods, no controls.
+		  Var openers() As String = Array("Begin DesktopWindow ", "Begin Window ", _
+		  "Begin DesktopContainer ", "Begin ContainerControl ")
+		  
 		  While lineNum < totalLines
 		    Var line As String = lines(lineNum).Trim
-		    If line.BeginsWith("Begin DesktopWindow ") Then
-		      // Extract window name.
-		      window.Name = line.Middle(20).Trim
-		      window.IsContainer = False
+		    
+		    Var matched As Boolean = False
+		    For Each opener As String In openers
+		      If Not line.BeginsWith(opener) Then Continue
+		      window.Name = line.Middle(opener.Length).Trim
+		      window.IsContainer = opener.IndexOf("Container") >= 0
 		      inVisualLayout = True
-		      lineNum = lineNum + 1
+		      matched = True
 		      Exit
-		    ElseIf line.BeginsWith("Begin DesktopContainer ") Then
-		      // Extract container name.
-		      window.Name = line.Middle(23).Trim
-		      window.IsContainer = True
-		      inVisualLayout = True
-		      lineNum = lineNum + 1
-		      Exit
-		    End If
+		    Next opener
+		    
 		    lineNum = lineNum + 1
+		    If matched Then Exit
 		  Wend
 		  
 		  // Parse the entire file.
@@ -1755,7 +1784,7 @@ Protected Class XKParser
 		    
 		    // Check for end of visual layout section.
 		    If inVisualLayout And trimmed = "End" And lineNum + 1 < totalLines Then
-		      If lines(lineNum + 1).Trim.BeginsWith("#tag EndDesktopWindow") Then
+		      If IsLayoutEndTag(lines(lineNum + 1)) Then
 		        // End of visual layout block, but continue parsing for #tag sections.
 		        inVisualLayout = False
 		        lineNum = lineNum + 1
