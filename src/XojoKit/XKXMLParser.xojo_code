@@ -333,6 +333,53 @@ Protected Class XKXMLParser
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h0
+		Function ParseExternalItem(content As String) As XKProjectItem
+		  /// Parses one external item file in Xojo's XML form (.xojo_xml_code, .xojo_xml_window)
+		  /// and returns the item it describes, or Nil.
+		  ///
+		  /// An XML external item is a whole RBProject document holding a single block, so it can
+		  /// be read with the same block parsers as a full XML project - it just has to be handed
+		  /// to them. The text parser used to give these files to its own #tag reader, which finds
+		  /// nothing in XML and reported the item as having no members.
+		  
+		  mLastError = ""
+		  
+		  Var doc As XmlDocument
+		  Try
+		    doc = New XmlDocument(content)
+		  Catch e As RuntimeException
+		    mLastError = "Could not parse the external item as XML: " + e.Message
+		    Return Nil
+		  End Try
+		  
+		  Var root As XmlNode = doc.DocumentElement
+		  If root = Nil Or root.Name <> "RBProject" Then
+		    mLastError = "External item is not an RBProject document."
+		    Return Nil
+		  End If
+		  
+		  For i As Integer = 0 To root.ChildCount - 1
+		    Var child As XmlNode = root.Child(i)
+		    If Not (child IsA XmlElement) Then Continue
+		    
+		    Var elem As XmlElement = XmlElement(child)
+		    If elem.Name <> "block" Then Continue
+		    
+		    // The block type is the shape of the file, not what the manifest calls the item -
+		    // every code container is written as type="Module", with IsClass and IsInterface
+		    // inside it deciding which one it actually is.
+		    Var blockType As String = elem.GetAttribute("type")
+		    Var item As XKProjectItem = ParseBlock(elem, blockType, 0)
+		    If item <> Nil Then Return item
+		  Next i
+		  
+		  mLastError = "External item contains no block element."
+		  Return Nil
+		  
+		End Function
+	#tag EndMethod
+
 	#tag Method, Flags = &h21, Description = 5061727365732061207369676E676C6520626C6F636B20656C656D656E742E
 		Private Function ParseBlock(node As XmlNode, blockType As String, blockId As Integer) As XKProjectItem
 		  /// Parses a single block element.

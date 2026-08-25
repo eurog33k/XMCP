@@ -38,7 +38,7 @@ Consequences worth holding on to:
 - **No save happens if the project was written by a newer Xojo than the running IDE.** Saving would rewrite it in the older format, so XMCP refuses and tells you the files may be behind the IDE instead.
 - **`delete_project_item`'s file route is the one place a save still happens.** It has to: it cuts a block out of a file and reloads, so the file must match the IDE first. Every reason to refuse is checked before that save, so a refusal writes nothing - and if the save itself changes the answer, the message says so.
 
-Binary projects (`.xojo_binary_project`) cannot be read at all - the format is not text. Save as Text or XML, which is what you want for version control anyway.
+Binary projects (`.xojo_binary_project`) cannot be read at all - the format is not text. Save as Text or XML, which is what you want for version control anyway. Individual items are a separate question from the project format: a text project can hold external items written as XML (`.xojo_xml_code`, `.xojo_xml_window`), which is the usual shape for code shared between projects, and those are read too.
 
 ### 1. `list_project_items` does not list a class's members
 

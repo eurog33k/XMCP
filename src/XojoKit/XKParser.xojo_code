@@ -930,6 +930,115 @@ Protected Class XKParser
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h21
+		Private Function IsXMLItemContent(content As String) As Boolean
+		  /// Whether this external item file holds Xojo's XML form rather than #tag text.
+		  
+		  Var head As String = content.Left(400).Trim
+		  If head = "" Then Return False
+		  
+		  Return head.BeginsWith("<?xml") Or head.BeginsWith("<RBProject")
+		  
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Sub ParseXMLItemFile(item As XKProjectItem, content As String, filePath As String)
+		  /// Fills an item declared in the manifest from its XML external file.
+		  ///
+		  /// The XML reader returns a fresh node of whatever the file describes, so its members
+		  /// are copied onto the item the manifest already created - that item carries the name,
+		  /// GUID and parent the rest of the parse is keyed to.
+		  
+		  Var xml As New XKXMLParser
+		  Var parsed As XKProjectItem = xml.ParseExternalItem(content)
+		  If parsed = Nil Then Return
+		  
+		  item.SourceFile = filePath
+		  
+		  If parsed IsA XKCodeContainer And item IsA XKCodeContainer Then
+		    CopyContainerMembers(XKCodeContainer(parsed), XKCodeContainer(item))
+		  ElseIf parsed IsA XKWindow And item IsA XKWindow Then
+		    CopyWindowMembers(XKWindow(parsed), XKWindow(item))
+		  End If
+		  
+		End Sub
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Sub CopyContainerMembers(source As XKCodeContainer, target As XKCodeContainer)
+		  /// Moves every member of a parsed container onto the manifest's item.
+		  
+		  If source.SuperClassName <> "" Then target.SuperClassName = source.SuperClassName
+		  
+		  For Each iface As String In source.Interfaces
+		    target.Interfaces.Add(iface)
+		  Next iface
+		  
+		  For Each m As XKMethod In source.Methods
+		    target.AddMethod(m)
+		  Next m
+		  
+		  For Each p As XKProperty In source.Properties
+		    target.AddProperty(p)
+		  Next p
+		  
+		  For Each cp As XKComputedProperty In source.ComputedProperties
+		    target.AddComputedProperty(cp)
+		  Next cp
+		  
+		  For Each c As XKConstant In source.Constants
+		    target.AddConstant(c)
+		  Next c
+		  
+		  For Each en As XKEnum In source.Enums
+		    target.AddEnum(en)
+		  Next en
+		  
+		  For Each ev As XKEvent In source.Events
+		    target.AddEvent(ev)
+		  Next ev
+		  
+		  For Each n As XKNote In source.Notes
+		    target.AddNote(n)
+		  Next n
+		  
+		  For Each vp As XKViewProperty In source.ViewProperties
+		    target.AddViewProperty(vp)
+		  Next vp
+		  
+		End Sub
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Sub CopyWindowMembers(source As XKWindow, target As XKWindow)
+		  /// The same for a window, which is not a code container and keeps its own lists.
+		  
+		  target.IsContainer = source.IsContainer
+		  
+		  For Each m As XKMethod In source.Methods
+		    target.AddMethod(m)
+		  Next m
+		  
+		  For Each p As XKProperty In source.Properties
+		    target.AddProperty(p)
+		  Next p
+		  
+		  For Each ev As XKEvent In source.Events
+		    target.AddEvent(ev)
+		  Next ev
+		  
+		  For Each c As XKControl In source.Controls
+		    target.AddControl(c)
+		  Next c
+		  
+		  For Each g As XKControlEventGroup In source.ControlEventGroups
+		    target.AddControlEventGroup(g)
+		  Next g
+		  
+		End Sub
+	#tag EndMethod
+
 	#tag Method, Flags = &h21, Description = 506172736573207468652065787465726E616C2066696C6520666F722074686520737065636966696564206974656D2E
 		Private Sub ParseItemExternalFile(item As XKProjectItem)
 		  /// Parses the external file for the specified item.
@@ -950,6 +1059,17 @@ Protected Class XKParser
 		  // Read the file contents.
 		  Var content As String = XKParserUtils.ReadFileContents(f)
 		  If content = "" Then Return
+		  
+		  // An external item may be written in Xojo's XML form rather than the #tag text form,
+		  // whatever the project format is: a text project can hold .xojo_xml_code items, which
+		  // is the usual shape for shared code under version control. Handing those to the #tag
+		  // readers below finds nothing in them, and the item was reported as having no members -
+		  // measured against a 41 KB class with 36 declarations. Detected by content rather than
+		  // by extension, since the extension is not the authority on what is inside.
+		  If IsXMLItemContent(content) Then
+		    ParseXMLItemFile(item, content, filePath)
+		    Return
+		  End If
 		  
 		  // Parse based on item type and file extension.
 		  If item IsA XKClass Then
