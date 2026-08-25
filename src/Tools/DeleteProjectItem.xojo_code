@@ -115,11 +115,23 @@ Inherits MCPKit.Tool
 		      itemPath + ". Delete it in the IDE instead.")
 		    End If
 
-		    // The IDE could not remove it - DeleteSelection is not implemented on Windows - so
-		    // take the route a human would: cut the member's #tag block out of the file and
-		    // reload. ProjectSource.Load saves first, so the file matches the IDE before it is
-		    // edited, and the reload afterwards is what stops the IDE writing the member back.
-		    Return DeleteViaFile(itemPath)
+		    // A member the IDE was asked to delete, still reachable afterwards. Only macOS gets
+		    // here - everywhere else the member path went straight to the file and returned - and
+		    // on macOS DeleteSelection does work. So this is not "the delete failed": it means
+		    // more than one declaration answers to the name, and the IDE has quietly removed one
+		    // of them.
+		    //
+		    // Escalating to file surgery here is what destroyed both. Measured on macOS with Xojo
+		    // 2025r3.1, one declaration on disk and a second held unsaved in the IDE: the save
+		    // committed the IDE's partial delete, the scan then found the single survivor on disk
+		    // and cut that too, disk went from one declaration to none, and the tool reported
+		    // success. Stopping here cannot destroy anything, so it stops.
+		    Return MCPKit.ToolResult.Failure(itemPath + " is still reachable after the IDE was asked to " + _
+		    "delete it. On macOS the IDE's delete does work, so more than one declaration answers to " + _
+		    "that name - and since the check beforehand found only one on disk, the others exist only " + _
+		    "in the IDE, unsaved. It has removed one of them in memory and the rest remain. Nothing " + _
+		    "was written to disk. revert_project puts the removed one back; to see the declarations, " + _
+		    "save_project then describe_item, and remove the right #tag block by hand.")
 		  End If
 
 		  Return MCPKit.ToolResult.Success("Deleted: " + itemPath + ". This is not saved to disk yet, so " + _
