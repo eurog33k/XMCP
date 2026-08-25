@@ -595,6 +595,11 @@ Protected Class XKXMLParser
 		  c.Name = GetChildText(node, "ItemName")
 		  c.Flags = GetItemFlags(node)
 		  
+		  // The value lives in ItemDef. Only a declaration-based fallback further down was being
+		  // read, which XML constants do not have - so every constant in an XML item came back
+		  // without its value while the text format showed it.
+		  c.DefaultValue = GetChildText(node, "ItemDef")
+		  
 		  // Set Scope based on Flags.
 		  Select Case c.Flags
 		  Case &h0

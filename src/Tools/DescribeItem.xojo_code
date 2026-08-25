@@ -104,7 +104,11 @@ Inherits MCPKit.Tool
 		    If matches.Count > 1 Then out.Add("--- " + index.ToString + " of " + matches.Count.ToString)
 		    out.Add(ProjectSource.MemberSignature(member))
 
-		    If includeCode Then
+		    // A property or constant has no body to be empty of, so saying "(empty body)" about one
+		    // reports an absence where there is nothing to be absent.
+		    Var carriesCode As Boolean = (member IsA XKMethod) Or (member IsA XKEvent)
+		    
+		    If includeCode And carriesCode Then
 		      Var code As String = ProjectSource.MemberCode(member)
 		      If code.Trim = "" Then
 		        out.Add("  (empty body)")

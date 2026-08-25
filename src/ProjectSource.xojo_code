@@ -30,7 +30,7 @@ Protected Module ProjectSource
 		  If props.Count > 0 Then
 		    out.Add("Properties (" + props.Count.ToString + "):")
 		    For Each p As XKProperty In props
-		      out.Add("  " + p.Name + If(p.DataType = "", "", " As " + p.DataType))
+		      out.Add("  " + ScopePrefix(p.Flags) + p.Name + If(p.DataType = "", "", " As " + p.DataType))
 		    Next p
 		  End If
 
@@ -46,7 +46,8 @@ Protected Module ProjectSource
 		  If constants.Count > 0 Then
 		    out.Add("Constants (" + constants.Count.ToString + "):")
 		    For Each k As XKConstant In constants
-		      out.Add("  " + k.Name + If(k.DefaultValue = "", "", " = " + Unquote(k.DefaultValue)))
+		      out.Add("  " + ScopePrefix(k.Flags) + k.Name + _
+		      If(k.DefaultValue = "", "", " = " + Unquote(k.DefaultValue)))
 		    Next k
 		  End If
 
@@ -110,7 +111,7 @@ Protected Module ProjectSource
 		  If props.Count > 0 Then
 		    out.Add("Properties (" + props.Count.ToString + "):")
 		    For Each p As XKProperty In props
-		      out.Add("  " + p.Name + If(p.DataType = "", "", " As " + p.DataType))
+		      out.Add("  " + ScopePrefix(p.Flags) + p.Name + If(p.DataType = "", "", " As " + p.DataType))
 		    Next p
 		  End If
 
@@ -243,6 +244,22 @@ Protected Module ProjectSource
 		  For Each ev As XKEvent In container.Events
 		    If ev.Name.Lowercase = leaf Then found.Add(ev)
 		  Next ev
+
+		  // Properties and constants are members as much as methods are. Leaving them out meant a
+		  // path to one answered "has no member called X" about a member the very next line of
+		  // describe_item's own container output would list - which reads as a missing item rather
+		  // than as an unsupported path.
+		  For Each prop As XKProperty In container.Properties
+		    If prop.Name.Lowercase = leaf Then found.Add(prop)
+		  Next prop
+
+		  For Each cp As XKComputedProperty In container.ComputedProperties
+		    If cp.Name.Lowercase = leaf Then found.Add(cp)
+		  Next cp
+
+		  For Each k As XKConstant In container.Constants
+		    If k.Name.Lowercase = leaf Then found.Add(k)
+		  Next k
 
 		  Return found
 
@@ -673,8 +690,59 @@ Protected Module ProjectSource
 		    Return label + "  (event implementation)"
 		  End If
 
+		  If member IsA XKProperty Then
+		    Var prop As XKProperty = XKProperty(member)
+		    Var text As String = ScopePrefix(prop.Flags) + prop.Name
+		    If prop.IsArray Then text = text + "()"
+		    If prop.DataType <> "" Then text = text + " As " + prop.DataType
+		    If prop.DefaultValue <> "" Then text = text + " = " + prop.DefaultValue
+		    Return text + "  (property)"
+		  End If
+
+		  If member IsA XKComputedProperty Then
+		    Var cp As XKComputedProperty = XKComputedProperty(member)
+		    Var text As String = ScopePrefix(cp.Flags) + cp.Name
+		    If cp.DataType <> "" Then text = text + " As " + cp.DataType
+		    Return text + "  (computed property)"
+		  End If
+
+		  If member IsA XKConstant Then
+		    Var k As XKConstant = XKConstant(member)
+		    Var text As String = ScopePrefix(k.Flags) + k.Name
+		    If k.DefaultValue <> "" Then text = text + " = " + Unquote(k.DefaultValue)
+		    Return text + "  (constant)"
+		  End If
+
 		  Return ""
 
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function ScopePrefix(flags As Integer) As String
+		  /// The access modifier a member's flags describe, as a prefix, or "" for Public.
+		  ///
+		  /// Scope used to appear only where the source format happened to write the keyword into
+		  /// the declaration line - which the text format does and the XML format does not - so one
+		  /// module read both ways gave "Private m_strAppName" from its text copy and
+		  /// "m_strAppName" from its XML copy. Both carry the flags; only one was believed. Taking
+		  /// it from the flags makes the two agree and makes the answer come from the field that
+		  /// actually means it.
+		  ///
+		  /// Public prints nothing: a prefix on every line earns a reader nothing, and it is the
+		  /// exceptions that need marking.
+		  
+		  Select Case flags
+		  Case &h0
+		    Return ""
+		  Case &h1
+		    Return "Protected "
+		  Case &h21
+		    Return "Private "
+		  Else
+		    Return ""
+		  End Select
+		  
 		End Function
 	#tag EndMethod
 

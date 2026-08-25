@@ -1514,6 +1514,21 @@ Protected Class XKParser
 		  
 		  Var declLine As String = lines(lineNum).Trim
 		  
+		  // Xojo writes the scope keyword into the declaration line as well as into the tag's
+		  // Flags - "Protected mConnected As Boolean" - and taking the whole left-hand side as the
+		  // name made the name "Protected mConnected". It read correctly by accident, since the
+		  // keyword happened to print where a scope belongs, but nothing could then find the
+		  // member: describe_item on IDECommunicator.mConnected answered "has no member called
+		  // mConnected", so every non-public property was unreachable by path. The keyword is
+		  // dropped here, and Flags - which carries the same fact and is what gets rendered - is
+		  // taken from the tag line above.
+		  For Each modifier As String In Array("Private ", "Protected ", "Public ", "Global ")
+		    If declLine.BeginsWith(modifier) Then
+		      declLine = declLine.Middle(modifier.Length).Trim
+		      Exit
+		    End If
+		  Next modifier
+		  
 		  // Parse: PropertyName As PropertyType [= DefaultValue]
 		  Var asPos As Integer = declLine.IndexOf(" As ")
 		  If asPos < 0 Then
