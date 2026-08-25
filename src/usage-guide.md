@@ -31,9 +31,10 @@ Most tools ask the IDE, which holds the project in memory. Four things the IDE c
 
 **Reading the files means saving first.** The IDE cannot be asked whether it has unsaved changes - no such command exists - so the only way to guarantee the files match memory is to write memory out. Any tool that reads the files therefore issues a save first and says so in its output.
 
-Two consequences worth holding on to:
+Three consequences worth holding on to:
 
 - **If you have edited a file on disk and not reloaded, that save overwrites your edit** with the IDE's older copy. This is the clobber hazard below, now reachable automatically. Call `revert_project` before anything that reads the files.
+- **The first IDE save after hand-editing a file rewrites that file in the IDE's own format**: methods reordered alphabetically, indentation normalised, and the standard `#tag ViewProperty` block filled in. Nothing is lost - it is the same code - but expect a large diff the first time, and none afterwards.
 - **No save happens if the project was written by a newer Xojo than the running IDE.** Saving would rewrite it in the older format, so XMCP refuses and tells you the files may be behind the IDE instead.
 
 Binary projects (`.xojo_binary_project`) cannot be read at all - the format is not text. Save as Text or XML, which is what you want for version control anyway.

@@ -1,25 +1,16 @@
 #tag Class
 Protected Class IDECommunicator
-	#tag Method, Flags = &h0
-		Sub Constructor()
-		  mTagCounter = 0
-		  mSocketPath = ""  // No last-known-good path yet; discovered on first request.
-		  LastErrorMessage = ""
-		  mConnected = False
-		End Sub
-	#tag EndMethod
-
 	#tag Method, Flags = &h21
 		Private Function CandidateSocketPaths() As String()
 		  /// The last known good path first, then every path the IDE may be listening on
 		  /// for this platform. See Platform.IPCSocketPaths.
-
+		  
 		  Var paths() As String
 		  paths.Add(mSocketPath)
 		  For Each p As String In Platform.IPCSocketPaths
 		    paths.Add(p)
 		  Next p
-
+		  
 		  Var unique() As String
 		  For Each p As String In paths
 		    If p.Trim = "" Then Continue
@@ -28,6 +19,15 @@ Protected Class IDECommunicator
 		  
 		  Return unique
 		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
+		Sub Constructor()
+		  mTagCounter = 0
+		  mSocketPath = ""  // No last-known-good path yet; discovered on first request.
+		  LastErrorMessage = ""
+		  mConnected = False
+		End Sub
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
@@ -40,24 +40,32 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h21
+		Private Sub LogVerbose(message As String)
+		  If App <> Nil And App.Verbose Then
+		    System.DebugLog(message)
+		  End If
+		End Sub
+	#tag EndMethod
+
 	#tag Method, Flags = &h0
 		Function NextTag() As String
 		  /// Returns a unique tag string for each request to correlate requests with responses.
-
+		  
 		  mTagCounter = mTagCounter + 1
 		  Return "xmcp_" + mTagCounter.ToString
-
+		  
 		End Function
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
 		Sub Reconnect()
 		  /// Reconnect to the Xojo IDE.
-
+		  
 		  mSocketPath = ""  // Forget the last known good path and rediscover.
 		  LastErrorMessage = ""
 		  mConnected = False
-
+		  
 		End Sub
 	#tag EndMethod
 
@@ -69,29 +77,29 @@ Protected Class IDECommunicator
 		  ///
 		  /// Retries up to 3 times with a short pause if the socket is temporarily
 		  /// unavailable (e.g. after the Xojo IDE navigates to a new item).
-
+		  
 		  LastErrorMessage = ""
-
+		  
 		  Var tag As String = NextTag
-
+		  
 		  // Build protocol upgrade + script request.
 		  Var proto As New JSONItem
 		  proto.Value("protocol") = 2
-
+		  
 		  Var req As New JSONItem
 		  req.Value("tag") = tag
 		  req.Value("script") = script
-
+		  
 		  Var payload As String = proto.ToString + Chr(0) + req.ToString + Chr(0)
 		  LogVerbose("IDE request " + tag + ": trying IPCSocket transport.")
-
+		  
 		  Const kMaxRetries = 5
 		  Const kRetryPauseMS = 1000
-
+		  
 		  Var attempt As Integer = 0
 		  While attempt < kMaxRetries
 		    attempt = attempt + 1
-
+		    
 		    Var socketErrors() As String
 		    For Each candidatePath As String In CandidateSocketPaths
 		      LogVerbose("IDE request " + tag + ": IPCSocket path " + candidatePath + " (attempt " + attempt.ToString + ")")
@@ -103,13 +111,13 @@ Protected Class IDECommunicator
 		        LogVerbose("IDE request " + tag + ": success via IPCSocket (" + candidatePath + ").")
 		        Return responseViaSocket
 		      End If
-
+		      
 		      If LastErrorMessage <> "" Then
 		        LogVerbose("IDE request " + tag + ": IPCSocket failed (" + candidatePath + "): " + LastErrorMessage)
 		        socketErrors.Add(LastErrorMessage)
 		      End If
 		    Next candidatePath
-
+		    
 		    // All paths failed. If nothing was listening anywhere (the IDE temporarily
 		    // closes its socket after a navigation), wait briefly and retry. On macOS
 		    // that shows up as a missing socket file; on Windows, where there is no file
@@ -121,7 +129,7 @@ Protected Class IDECommunicator
 		        Exit
 		      End If
 		    Next err
-
+		    
 		    If attempt < kMaxRetries And (socketErrors.Count = 0 Or allNoListener) Then
 		      LogVerbose("IDE request " + tag + ": socket temporarily unavailable, retrying in " + kRetryPauseMS.ToString + "ms...")
 		      // Sleeping is safe here: this app has no Timers or socket event handlers,
@@ -134,7 +142,7 @@ Protected Class IDECommunicator
 		        LastErrorMessage = "No IPCSocket response from Xojo IDE within " + timeoutMS.ToString + _
 		        "ms. Searched: " + Platform.SocketPathSummary
 		      End If
-
+		      
 		      If allNoListener Then
 		        // Nothing was listening on any candidate path. By far the most common cause
 		        // is simply that the IDE is not running, and the raw timeout text does not
@@ -144,23 +152,15 @@ Protected Class IDECommunicator
 		      Exit While
 		    End If
 		  Wend
-
+		  
 		  LogVerbose("IDE request " + tag + ": failed. " + LastErrorMessage)
-
+		  
 		  mConnected = False
 		  Return Nil
-
+		  
 		End Function
 	#tag EndMethod
-	
-	#tag Method, Flags = &h21
-		Private Sub LogVerbose(message As String)
-		  If App <> Nil And App.Verbose Then
-		    System.DebugLog(message)
-		  End If
-		End Sub
-	#tag EndMethod
-	
+
 	#tag Method, Flags = &h21
 		Private Function SendAndReceiveViaIPCSocket(candidatePath As String, payload As String, tag As String, timeoutMS As Integer) As JSONItem
 		  LastErrorMessage = ""
@@ -176,18 +176,18 @@ Protected Class IDECommunicator
 		      Return Nil
 		    End If
 		  #EndIf
-
+		  
 		  Var deadlineUS As Double = System.Microseconds + (timeoutMS * 1000.0)
 		  Var sock As New IPCSocket
 		  sock.Path = candidatePath
-
+		  
 		  Try
 		    sock.Connect
 		  Catch e As RuntimeException
 		    LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + ": " + e.Message
 		    Return Nil
 		  End Try
-
+		  
 		  // Bound the connect wait separately from the response wait. Without a real
 		  // socket file to pre-check, a wrong candidate can only be ruled out by a failed
 		  // connect, and a build request would otherwise sit here for its full 120s
@@ -195,19 +195,19 @@ Protected Class IDECommunicator
 		  Var connectTimeoutMS As Integer = timeoutMS
 		  If connectTimeoutMS > kConnectTimeoutMS Then connectTimeoutMS = kConnectTimeoutMS
 		  Var connectDeadlineUS As Double = System.Microseconds + (connectTimeoutMS * 1000.0)
-
+		  
 		  While Not sock.IsConnected And System.Microseconds < connectDeadlineUS
 		    sock.Poll
 		    Thread.SleepCurrent(1)  // 1ms between polls; without this we spin a core until connected.
 		  Wend
-
+		  
 		  If Not sock.IsConnected Then
 		    sock.Close
 		    LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + _
 		    " (connect timed out after " + connectTimeoutMS.ToString + "ms)."
 		    Return Nil
 		  End If
-
+		  
 		  Try
 		    sock.Write(payload)
 		    sock.Flush
@@ -267,11 +267,6 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
-	#tag Constant, Name = kConnectTimeoutMS, Type = Double, Dynamic = False, Default = \"1500", Scope = Private
-	#tag EndConstant
-
-	#tag Constant, Name = kNoListenerPrefix, Type = String, Dynamic = False, Default = \"No IDE listener", Scope = Private
-	#tag EndConstant
 
 	#tag Property, Flags = &h0
 		LastErrorMessage As String
@@ -290,7 +285,30 @@ Protected Class IDECommunicator
 	#tag EndProperty
 
 
+	#tag Constant, Name = kConnectTimeoutMS, Type = Double, Dynamic = False, Default = \"1500", Scope = Private
+	#tag EndConstant
+
+	#tag Constant, Name = kNoListenerPrefix, Type = String, Dynamic = False, Default = \"No IDE listener", Scope = Private
+	#tag EndConstant
+
+
 	#tag ViewBehavior
+		#tag ViewProperty
+			Name="Left"
+			Visible=true
+			Group="Position"
+			InitialValue="0"
+			Type="Integer"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="Top"
+			Visible=true
+			Group="Position"
+			InitialValue="0"
+			Type="Integer"
+			EditorType=""
+		#tag EndViewProperty
 		#tag ViewProperty
 			Name="Name"
 			Visible=true
@@ -311,6 +329,14 @@ Protected Class IDECommunicator
 			Name="Super"
 			Visible=true
 			Group="ID"
+			InitialValue=""
+			Type="String"
+			EditorType=""
+		#tag EndViewProperty
+		#tag ViewProperty
+			Name="LastErrorMessage"
+			Visible=false
+			Group="Behavior"
 			InitialValue=""
 			Type="String"
 			EditorType=""

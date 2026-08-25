@@ -55,6 +55,10 @@ says so in its output. Two things follow, and the first can cost you work:
 - **If you edited a file on disk without reloading, that save overwrites your edit** with the IDE's
   older copy. Call `revert_project` first. This is the clobber hazard from section 5, now reachable
   without you asking for a save.
+- **The first IDE save after you hand-edit a file rewrites it in the IDE's format** — methods
+  reordered alphabetically, indentation normalised, the standard `#tag ViewProperty` block added.
+  The code is unchanged, but the diff is large the first time and empty thereafter. Worth committing
+  on its own so later diffs stay readable.
 - **A project written by a newer Xojo than your IDE is never saved** — that would rewrite it in the
   older format. XMCP skips the save and warns that the files may be behind.
 
@@ -127,6 +131,7 @@ in a script and discards the rest, so print once, at the point whose value you w
 | Window event handlers are invisible to IDE scripting | they live in `.xojo_window` | `describe_item` lists them and `get_code` reads them, both by parsing the file; to *change* one, edit the file and `revert_project` — see [section 5](#5-editing-safely) |
 | Xojo project formats | Text and XML are readable; binary is not | save as Text or XML — which is what version control wants anyway |
 | `set_code` leaves a trailing blank line, and the IDE re-indents the body | code goes through the code editor, which normalises it | harmless; do not expect a byte-identical round-trip |
+| A save reformats hand-edited files wholesale | the IDE writes its own canonical layout and ordering | commit that normalisation once; subsequent saves are stable |
 | An overloaded method reads back one version | paths carry no signature, so the IDE returns whichever is declared first in the file | read the `.xojo_code` file on disk when you need to see every overload |
 | A folder path fails to select or delete | IDE scripting cannot select folders at all, though `list_project_items` still lists their contents | act on the items inside, or use the IDE for the folder itself |
 | `constant_value` returns nothing for a bare name | an unqualified name resolves only against the current Navigator selection | qualify it: `App.kVersion` |
