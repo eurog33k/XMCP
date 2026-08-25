@@ -500,7 +500,10 @@ Protected Class XKParser
 		  en.Flags = flags
 		  en.SourceLine = startLine + 1
 		  
-		  // Parse values.
+		  // Parse values. Xojo numbers them from zero unless a value says otherwise, and this
+		  // tracks where an unwritten one would land.
+		  Var nextImplicit As Integer = 0
+		  
 		  lineNum = lineNum + 1
 		  
 		  While lineNum < lines.Count
@@ -509,15 +512,27 @@ Protected Class XKParser
 		    If line.BeginsWith("#tag EndEnum") Then
 		      Exit
 		    ElseIf line <> "" And Not line.BeginsWith("#") Then
-		      // Parse enum value: ValueName = IntegerValue
+		      // "ValueName = 3", or just "ValueName" - and the second is the common form, since
+		      // Xojo only writes the number when someone pinned it. Requiring the " = " dropped
+		      // every implicit value silently, so an enum came back with a name and nothing in it.
+		      // Measured against a real project: fourteen enums, no values on any of them.
+		      Var ev As New XKEnumValue
 		      Var eqPos As Integer = line.IndexOf(" = ")
+		      
 		      If eqPos >= 0 Then
-		        Var ev As New XKEnumValue
 		        ev.Name = line.Left(eqPos).Trim
 		        Var valueStr As String = line.Middle(eqPos + 3).Trim
 		        ev.Value = Val(valueStr)
-		        en.AddValue(ev)
+		        nextImplicit = ev.Value + 1
+		      Else
+		        // An implicit value continues the count, which is how Xojo numbers them: from
+		        // zero, or on from the last one that was written down.
+		        ev.Name = line
+		        ev.Value = nextImplicit
+		        nextImplicit = nextImplicit + 1
 		      End If
+		      
+		      If ev.Name <> "" Then en.AddValue(ev)
 		    End If
 		    
 		    lineNum = lineNum + 1
