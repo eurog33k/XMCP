@@ -28,8 +28,17 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
 		  End If
 
-		  // 1. The item has to exist, or there is nothing to confirm afterwards.
+		  // 1. The item has to exist, or there is nothing to confirm afterwards. A folder is
+		  //    reachable by neither mechanism - SelectProjectItem returns False for folders and
+		  //    Location does not accept them - so distinguish "is a folder" from "does not
+		  //    exist" before blaming the caller for a bad path.
 		  If Not Reaches(itemPath) Then
+		    If ExistsInParent(itemPath) Then
+		      Return MCPKit.ToolResult.Failure(itemPath + " exists but cannot be selected through " + _
+		      "IDE scripting, which is how folders behave - SelectProjectItem returns False for " + _
+		      "them. Nothing was deleted; delete it in the IDE instead.")
+		    End If
+
 		    Return MCPKit.ToolResult.Failure("No such project item: " + itemPath + ". Nothing was deleted.")
 		  End If
 
@@ -81,6 +90,35 @@ Inherits MCPKit.Tool
 
 		  Return MCPKit.ToolResult.Success("Deleted: " + itemPath + ". This is not saved to disk yet - " + _
 		  "revert_project restores it, save_project makes it permanent.")
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function ExistsInParent(path As String) As Boolean
+		  /// Whether the item is listed among its parent's sub-locations. This is the only way
+		  /// to see a folder: SubLocations lists it, while neither Location nor SelectProjectItem
+		  /// can select it.
+
+		  Var parts() As String = path.Split(".")
+		  If parts.Count = 0 Then Return False
+
+		  Var name As String = parts(parts.LastIndex)
+		  parts.RemoveAt(parts.LastIndex)
+		  Var parent As String = String.FromArray(parts, ".")
+
+		  Var script As String = "Print SubLocations(""" + parent.ReplaceAll("""", """""") + """)"
+		  Var response As JSONItem = App.IDE.SendAndReceive(script)
+		  If response = Nil Or Not response.HasKey("response") Then Return False
+
+		  Var resp As Variant = response.Value("response")
+		  If resp.Type <> Variant.TypeString Then Return False
+
+		  For Each item As String In resp.StringValue.Split(Chr(9))
+		    If item.Trim = name Then Return True
+		  Next item
+
+		  Return False
 
 		End Function
 	#tag EndMethod

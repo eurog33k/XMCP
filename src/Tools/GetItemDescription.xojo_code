@@ -35,22 +35,37 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
 		  End If
 
-		  Var navScript As String = ""
-		  If location <> "" Then
-		    navScript = "If Not SelectProjectItem(""" + location.ReplaceAll("""", """""") + """) Then" + EndOfLine + _
-		    "  Print ""ERROR: Could not navigate to: " + location.ReplaceAll("""", """""") + """" + EndOfLine + _
-		    "  End" + EndOfLine + _
-		    "End If" + EndOfLine
+		  // The body runs inside an If/Else rather than after a bare "End" to abort early:
+		  // "End" on its own is not a statement in XojoScript, and emitting it made every
+		  // call that passed a location fail with a syntax error.
+		  //
+		  // Navigation assigns Location first, which reaches methods, properties and event
+		  // implementations; SelectProjectItem, used alone here before, only reaches top-level
+		  // items, so a member path could not have worked even once the syntax was valid.
+		  Var body As String
+		  If hasValue Then
+		    body = "ItemDescription = """ + value.ReplaceAll("""", """""") + """" + EndOfLine + _
+		    "Print ""OK"""
+		  Else
+		    body = "Print ItemDescription"
 		  End If
 
 		  Var script As String
-		  If hasValue Then
-		    script = navScript + _
-		    "ItemDescription = """ + value.ReplaceAll("""", """""") + """" + EndOfLine + _
-		    "Print ""OK"""
+		  If location <> "" Then
+		    Var target As String = location.ReplaceAll("""", """""")
+		    script = "Dim target As String = """ + target + """" + EndOfLine + _
+		    "Dim ok As Boolean = True" + EndOfLine + _
+		    "Location = target" + EndOfLine + _
+		    "If Location <> target Then" + EndOfLine + _
+		    "  ok = SelectProjectItem(target)" + EndOfLine + _
+		    "End If" + EndOfLine + _
+		    "If Not ok Then" + EndOfLine + _
+		    "  Print ""ERROR: Could not navigate to: " + target + """" + EndOfLine + _
+		    "Else" + EndOfLine + _
+		    IndentLines(body, "  ") + EndOfLine + _
+		    "End If"
 		  Else
-		    script = navScript + _
-		    "Print ItemDescription"
+		    script = body
 		  End If
 
 		  Var response As JSONItem = App.IDE.SendAndReceive(script)
@@ -74,6 +89,14 @@ Inherits MCPKit.Tool
 		    If resp.BeginsWith("ERROR:") Then
 		      Return MCPKit.ToolResult.Failure(resp)
 		    End If
+
+		    // An item with no description makes the script print nothing, and the IDE answers
+		    // with an empty object. Returning a bare "{}" reads like a value rather than the
+		    // absence of one.
+		    If resp = "" Or resp = "{}" Then
+		      Return MCPKit.ToolResult.Success("(no description set)")
+		    End If
+
 		    Return MCPKit.ToolResult.Success(resp)
 		  End If
 
@@ -82,6 +105,19 @@ Inherits MCPKit.Tool
 		End Function
 	#tag EndMethod
 
+
+	#tag Method, Flags = &h21
+		Private Function IndentLines(value As String, indent As String) As String
+		  Var lines() As String = SplitLines(value)
+
+		  For i As Integer = 0 To lines.LastIndex
+		    If lines(i) <> "" Then lines(i) = indent + lines(i)
+		  Next i
+
+		  Return String.FromArray(lines, EndOfLine)
+
+		End Function
+	#tag EndMethod
 
 	#tag ViewBehavior
 		#tag ViewProperty

@@ -12,9 +12,16 @@ Inherits MCPKit.Tool
 		Function Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult
 		  #Pragma Unused args
 
+		  // Report an empty location as such. Printing "loc (typ)" unconditionally produced a
+		  // bare "()" whenever nothing was selected - which happens straight after a delete -
+		  // and that reads like a malformed answer rather than an empty one.
 		  Var script As String = "Dim loc As String = Location" + EndOfLine + _
 		  "Dim typ As String = TypeOfCurrentLocation" + EndOfLine + _
-		  "Print loc + "" ("" + typ + "")"""
+		  "If loc = """" Then" + EndOfLine + _
+		  "  Print ""Nothing is selected in the Navigator.""" + EndOfLine + _
+		  "Else" + EndOfLine + _
+		  "  Print loc + "" ("" + typ + "")""" + EndOfLine + _
+		  "End If"
 
 		  If App.IDE = Nil Then
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")

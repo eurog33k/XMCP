@@ -3,7 +3,7 @@ Protected Class SelectProjectItem
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("select_project_item", "Selects and navigates to a specific item in the Xojo IDE Navigator, including methods, properties and event implementations. Use dot-separated paths like 'Module1.MyMethod' or 'App.Opening'.")
+		  Super.Constructor("select_project_item", "Selects and navigates to a specific item in the Xojo IDE Navigator, including methods, properties and event implementations. Use dot-separated paths like 'Module1.MyMethod' or 'App.Opening'. Folders are the exception: IDE scripting cannot select a folder, so this fails for one even though list_project_items can list its contents.")
 
 		  Parameters.Add(New MCPKit.ToolParameter("item_path", MCPKit.ToolParameterTypes.String_, _
 		  "Dot-separated path to the project item to select (e.g. 'App', 'Module1.MyMethod').", _

@@ -70,9 +70,13 @@ Inherits MCPKit.Tool
 		  For i As Integer = 0 To mCachedLines.LastIndex
 		    Var line As String = mCachedLines(i)
 
-		    // Track section headers (lines starting with #).
-		    If line.BeginsWith("#") Then
-		      currentSection = line
+		    // Track section headings. Xojo ships these docs as reStructuredText, where a
+		    // heading is a line of text underlined by repeated punctuation - there are ~11,000
+		    // of those and only 5 Markdown "# " headings in llms-full.txt. Matching a bare
+		    // leading "#" instead picked up the 700 "#." enumerated-list markers, which is why
+		    // matches were labelled with unrelated text from far above them.
+		    If IsHeading(i) Then
+		      currentSection = line.Trim
 		    End If
 
 		    If line.Lowercase.IndexOf(lowerQuery) >= 0 Then
@@ -135,6 +139,45 @@ Inherits MCPKit.Tool
 		Private mCachedLines() As String
 	#tag EndProperty
 
+
+	#tag Method, Flags = &h21
+		Private Function IsHeading(index As Integer) As Boolean
+		  /// Whether the cached line at this index is a section heading.
+
+		  Var line As String = mCachedLines(index).Trim
+		  If line = "" Then Return False
+
+		  // Markdown, space required: "#." is an RST list item, not a heading.
+		  If line.BeginsWith("# ") Or line.BeginsWith("## ") Or line.BeginsWith("### ") Then Return True
+
+		  // RST: the following line underlines the heading with one repeated character.
+		  If index >= mCachedLines.LastIndex Then Return False
+		  If IsUnderline(line) Then Return False  // a rule, not a title
+
+		  Return IsUnderline(mCachedLines(index + 1).Trim)
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function IsUnderline(value As String) As Boolean
+		  /// A run of three or more of the same punctuation character, as RST underlines a
+		  /// heading with.
+
+		  If value.Length < 3 Then Return False
+
+		  Var markers As String = "=-~^*+#"
+		  Var first As String = value.Left(1)
+		  If markers.IndexOf(first) < 0 Then Return False
+
+		  For i As Integer = 1 To value.Length - 1
+		    If value.Middle(i, 1) <> first Then Return False
+		  Next i
+
+		  Return True
+
+		End Function
+	#tag EndMethod
 
 	#tag ViewBehavior
 		#tag ViewProperty

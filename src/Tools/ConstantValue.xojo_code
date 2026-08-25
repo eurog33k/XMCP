@@ -3,10 +3,10 @@ Protected Class ConstantValue
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("constant_value", "Gets or sets the value of a project constant in the Xojo IDE. The constant must already exist in the project.")
+		  Super.Constructor("constant_value", "Gets or sets the value of a project constant in the Xojo IDE. The constant must already exist - IDE scripting cannot create a properly named, typed constant. Qualify the name with its owner (e.g. 'App.kVersion'), because an unqualified name is only resolved against whatever item happens to be selected in the Navigator and otherwise returns nothing.")
 
 		  Parameters.Add(New MCPKit.ToolParameter("name", MCPKit.ToolParameterTypes.String_, _
-		  "The constant name. Can be a simple name (e.g. 'kVersion') or fully qualified (e.g. 'App.kVersion').", _
+		  "The constant name, qualified with its owner: 'App.kVersion', 'Module1.ISNVSYNC'. A bare name like 'kVersion' resolves only against the currently selected project item, so it usually returns nothing - qualify it. Folder names are not part of the path.", _
 		  False, "", False))
 
 		  Parameters.Add(New MCPKit.ToolParameter("value", MCPKit.ToolParameterTypes.String_, _
