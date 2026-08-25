@@ -375,6 +375,233 @@ Protected Module ProjectSource
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
+		Function ItemFile(project As XKProject, item As XKProjectItem) As FolderItem
+		  /// The file on disk holding this project item, or Nil.
+
+		  If project = Nil Or item = Nil Or item.RelativePath = "" Then Return Nil
+
+		  Var manifest As FolderItem = FileFromShellPath(ProjectPath)
+		  If manifest = Nil Or manifest.Parent = Nil Then Return Nil
+
+		  Var file As FolderItem = manifest.Parent
+		  For Each part As String In item.RelativePath.ReplaceAll("\\", "/").Split("/")
+		    If part = "" Or part = "." Then Continue
+		    Try
+		      file = file.Child(part)
+		    Catch e As RuntimeException
+		      Return Nil
+		    End Try
+		    If file = Nil Then Return Nil
+		  Next part
+
+		  If Not file.Exists Then Return Nil
+		  Return file
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
+		Function RemoveMemberFromFile(project As XKProject, path As String, ByRef errorMessage As String) As Boolean
+		  /// Deletes a member by cutting its #tag block out of the .xojo_code file that holds it.
+		  ///
+		  /// This is the only way to remove a method or property on a platform where the IDE's
+		  /// DeleteSelection does nothing. The caller must reload the project afterwards, or the
+		  /// IDE will still hold the member and write it back on its next save.
+		  ///
+		  /// Refuses when the name is ambiguous. Cutting the wrong overload out of a source file
+		  /// is not a mistake worth risking to save a round trip.
+
+		  errorMessage = ""
+
+		  Var parts() As String = path.Split(".")
+		  If parts.Count < 2 Then
+		    errorMessage = "Not a member path: " + path
+		    Return False
+		  End If
+
+		  Var name As String = parts(parts.LastIndex)
+		  parts.RemoveAt(parts.LastIndex)
+		  Var ownerPath As String = String.FromArray(parts, ".")
+
+		  Var owner As XKProjectItem = FindItem(project, ownerPath)
+		  If owner = Nil Then
+		    errorMessage = "Could not find " + ownerPath + " in the project files."
+		    Return False
+		  End If
+
+		  Var file As FolderItem = ItemFile(project, owner)
+		  If file = Nil Then
+		    errorMessage = "Could not locate the file for " + ownerPath + _
+		    ". External items and binary projects cannot be edited this way."
+		    Return False
+		  End If
+
+		  Var contents As String
+		  Try
+		    Var stream As TextInputStream = TextInputStream.Open(file)
+		    stream.Encoding = Encodings.UTF8
+		    contents = stream.ReadAll
+		    stream.Close
+		  Catch e As RuntimeException
+		    errorMessage = "Could not read " + file.NativePath + ": " + e.Message
+		    Return False
+		  End Try
+
+		  Var lines() As String = contents.ReplaceLineEndings(Chr(10)).Split(Chr(10))
+		  Var keep() As String
+
+		  Var blockStart As Integer = -1
+		  Var blockKind As String = ""
+		  Var blockMatches As Boolean = False
+		  Var removed As Integer = 0
+		  Var swallowBlank As Boolean = False
+		  Var pending() As String
+
+		  For i As Integer = 0 To lines.LastIndex
+		    Var line As String = lines(i)
+		    Var trimmed As String = line.Trim
+
+		    If blockStart < 0 Then
+		      // Swallow one blank line left behind by a removed block, so repeated deletes do
+		      // not accumulate empty lines in the file.
+		      If swallowBlank Then
+		        swallowBlank = False
+		        If trimmed = "" Then Continue
+		      End If
+
+		      Var kind As String = BlockKind(trimmed)
+		      If kind <> "" Then
+		        blockStart = i
+		        blockKind = kind
+		        blockMatches = TagLineNames(trimmed, name)
+		        pending.RemoveAll
+		        pending.Add(line)
+		        Continue
+		      End If
+
+		      keep.Add(line)
+		      Continue
+		    End If
+
+		    // Inside a block: collect it, and watch for the declaration that names the member.
+		    pending.Add(line)
+		    If Not blockMatches And DeclaresName(blockKind, trimmed, name) Then blockMatches = True
+
+		    If trimmed = "#tag End" + blockKind Then
+		      If blockMatches Then
+		        removed = removed + 1
+		        swallowBlank = True
+		      Else
+		        For Each held As String In pending
+		          keep.Add(held)
+		        Next held
+		      End If
+		      blockStart = -1
+		      blockKind = ""
+		      blockMatches = False
+		      pending.RemoveAll
+		    End If
+		  Next i
+
+		  If blockStart >= 0 Then
+		    errorMessage = "The file ends inside an unterminated #tag block; refusing to edit it."
+		    Return False
+		  End If
+
+		  If removed = 0 Then
+		    errorMessage = "Found no declaration of """ + name + """ in " + file.NativePath + "."
+		    Return False
+		  End If
+
+		  If removed > 1 Then
+		    errorMessage = """" + name + """ has " + removed.ToString + " declarations in " + _
+		    file.NativePath + ". Refusing to guess which to delete - remove the right #tag block " + _
+		    "by hand, then call revert_project. describe_item lists them with their signatures."
+		    Return False
+		  End If
+
+		  Try
+		    Var out As TextOutputStream = TextOutputStream.Create(file)
+		    out.Write(String.FromArray(keep, EndOfLine))
+		    out.Close
+		  Catch e As RuntimeException
+		    errorMessage = "Could not write " + file.NativePath + ": " + e.Message
+		    Return False
+		  End Try
+
+		  Return True
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function BlockKind(trimmedLine As String) As String
+		  /// The kind of #tag block this line opens, or "".
+
+		  If Not trimmedLine.BeginsWith("#tag ") Then Return ""
+
+		  Var kinds() As String = Array("Method", "ComputedProperty", "Property", "Constant", "Note", "Event")
+		  For Each kind As String In kinds
+		    If trimmedLine.BeginsWith("#tag " + kind) Then Return kind
+		  Next kind
+
+		  Return ""
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function DeclaresName(blockKind As String, trimmedLine As String, name As String) As Boolean
+		  /// Whether this line inside a block declares the named member.
+
+		  Select Case blockKind
+		  Case "Method", "Event"
+		    Var lower As String = trimmedLine.Lowercase
+		    Var target As String = name.Lowercase
+		    Return lower.IndexOf("sub " + target + "(") >= 0 Or _
+		    lower.IndexOf("function " + target + "(") >= 0
+
+		  Case "Property", "ComputedProperty"
+		    // "Name As Type", possibly preceded by a scope keyword.
+		    Var words() As String = trimmedLine.Split(" ")
+		    For i As Integer = 0 To words.LastIndex
+		      Var word As String = words(i).Trim
+		      If word = "" Then Continue
+		      Var bare As String = word
+		      Var bracket As Integer = bare.IndexOf("(")
+		      If bracket > 0 Then bare = bare.Left(bracket)
+		      If bare.Lowercase = name.Lowercase Then Return True
+		      If word.Lowercase <> "protected" And word.Lowercase <> "private" And _
+		        word.Lowercase <> "shared" Then Return False
+		    Next i
+		    Return False
+		  End Select
+
+		  Return False
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function TagLineNames(trimmedLine As String, name As String) As Boolean
+		  /// Constants and notes carry their name on the tag line itself:
+		  /// #tag Constant, Name = kFoo, Type = ...
+
+		  Var marker As String = "name = "
+		  Var lower As String = trimmedLine.Lowercase
+		  Var at As Integer = lower.IndexOf(marker)
+		  If at < 0 Then Return False
+
+		  Var rest As String = trimmedLine.Middle(at + marker.Length)
+		  Var comma As Integer = rest.IndexOf(",")
+		  If comma >= 0 Then rest = rest.Left(comma)
+
+		  Return rest.Trim.Lowercase = name.Lowercase
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
 		Function MemberSignature(member As Variant) As String
 		  /// A one-line signature for a parsed member.
 

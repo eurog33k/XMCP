@@ -211,7 +211,9 @@ Sets a method or property declaration — name, parameters, return type, scope, 
 
 Deletes a project item. Requires an explicit `item_path` and never acts on the current selection. Deleting a container deletes its contents. Reversible with `revert_project` until the project is saved.
 
-Two mechanisms, because the IDE has two independent selections. For a **top-level item** (class, module, folder) the tool selects it in the Navigator and issues `DoCommand("Delete")` — works on macOS and Windows. For a **member** (a method, property or constant inside a class or module) `SelectProjectItem` cannot reach it and the Navigator stays on the *parent*, so `Delete` is never fired there; the tool points the editor at the member and uses `DoCommand("DeleteSelection")`, which works on macOS only. On Windows it refuses and names the disk route instead.
+Three routes, because the IDE has two independent selections and one of its delete commands is unimplemented. For a **top-level item** (class, module, folder) the tool selects it in the Navigator and issues `DoCommand("Delete")` — both platforms. For a **member** (a method, property or constant) `SelectProjectItem` cannot reach it and the Navigator stays on the *parent*, so `Delete` is never fired there; the tool points the editor at the member and uses `DoCommand("DeleteSelection")`, which works on macOS. Where that does nothing — Windows — it falls back to cutting the member's `#tag` block out of the `.xojo_code` file and reloading the project, and says so, because unlike the other two routes that deletion is already on disk. It refuses rather than guess if the name is overloaded.
+
+Verification is retried until the IDE actually answers: a delete suppresses the output of the script that follows it, and an unanswered check used to be read as success.
 
 Before deleting an item the tool checks that `ProjectItem` — the IDE's Navigator selection — is the item you asked for, so a mismatch refuses rather than deleting the wrong thing.
 

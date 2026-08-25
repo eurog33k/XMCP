@@ -56,6 +56,8 @@ A path that does not exist is reported as `ERROR: Could not navigate to: ...` ra
 
 `lookup_class` returns Xojo's shipped documentation verbatim. If a member the compiler accepts is missing from it, the documentation omits it - the compiler is authoritative, not the tool. Do not tell the user their code will not compile on the strength of a doc lookup.
 
+**Descriptions are hex-encoded on disk.** In a `.xojo_code` file a description sits on the `#tag` line as `Description = 5265616473...`, not as readable text - worth knowing before hand-editing one.
+
 **Folders cannot be selected.** IDE scripting has no way to select a folder: `SelectProjectItem` returns False for one and `Location` will not take it, even though `list_project_items` lists its contents perfectly well. So `select_project_item` and `delete_project_item` fail on a folder path - the latter says so specifically rather than claiming the folder does not exist.
 
 **`constant_value` needs a qualified name.** `App.kVersion` works; a bare `kVersion` resolves only against whatever is selected in the Navigator and usually returns nothing. Folder names are not part of the path.
@@ -117,7 +119,7 @@ XMCP runs on macOS and Windows. What changes:
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | `get_system_log` | available | **not registered** — no unified-log equivalent |
 | `revert_project` | works | works — opens an empty project first if yours is the only window |
-| `delete_project_item` | works for items and members | works for **items only** — members must go via disk (delete the `#tag Method` block, then `revert_project`) |
+| `delete_project_item` | works for items and members | works for both — members are removed by editing the project file, so that deletion is already on disk |
 | Docs location | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_project_info` paths | POSIX paths | long paths (XMCP converts the IDE's 8.3 short paths back) |
 

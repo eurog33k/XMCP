@@ -222,7 +222,7 @@ Linux, so write to a log file there instead.
 | Documentation | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_system_log` | available | **not available** — `System.DebugLog` goes to `OutputDebugString`, which only an attached debugger sees |
 | `revert_project` | closes and reopens the project | same, but first opens an empty project to hold the IDE up — skipped if you already have another project open |
-| `delete_project_item` | items and members | **items only** — members must be removed from the `.xojo_code` file on disk |
+| `delete_project_item` | items and members, in memory | items in memory; **members by editing the file**, so already on disk — use source control to undo |
 
 Everything else behaves identically. Two Windows-specific rules:
 

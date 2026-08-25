@@ -3,7 +3,7 @@ Protected Class DeleteProjectItem
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("delete_project_item", "Deletes a project item: a class, module, folder or other top-level item, on both macOS and Windows. Deleting a container deletes everything inside it. MEMBERS (a method, property or constant inside a class or module) can only be deleted this way on macOS; on Windows the tool refuses and tells you to remove the item from the .xojo_code file on disk and call revert_project. An explicit item_path is required - this never acts on whatever happens to be selected. The change is in the IDE only until the project is saved, so revert_project undoes it up to that point; after a save it is permanent.")
+		  Super.Constructor("delete_project_item", "Deletes a project item: a class, module, folder or other top-level item, on both macOS and Windows. Deleting a container deletes everything inside it. MEMBERS (a method, property or constant inside a class or module) are deleted through the IDE where that works (macOS) and by editing the project file where it does not (Windows) - in the latter case the deletion is already on disk when it returns, so source control is the way back, and the tool says which route it took. It refuses rather than guess if the member name is overloaded. An explicit item_path is required - this never acts on whatever happens to be selected. The change is in the IDE only until the project is saved, so revert_project undoes it up to that point; after a save it is permanent.")
 
 		  Parameters.Add(New MCPKit.ToolParameter("item_path", MCPKit.ToolParameterTypes.String_, _
 		  "Dot-separated path of the item to delete (e.g. 'Module1.Untitled', 'MyClass').", _
@@ -32,7 +32,13 @@ Inherits MCPKit.Tool
 		  //    reachable by neither mechanism - SelectProjectItem returns False for folders and
 		  //    Location does not accept them - so distinguish "is a folder" from "does not
 		  //    exist" before blaming the caller for a bad path.
-		  If Not Reaches(itemPath) Then
+		  Var answered As Boolean
+		  If Not Reaches(itemPath, answered) Then
+		    If Not answered Then
+		      Return MCPKit.ToolResult.Failure("The IDE did not answer when asked whether " + itemPath + _
+		      " exists, so nothing was attempted.")
+		    End If
+
 		    If ExistsInParent(itemPath) Then
 		      Return MCPKit.ToolResult.Failure(itemPath + " exists but cannot be selected through " + _
 		      "IDE scripting, which is how folders behave - SelectProjectItem returns False for " + _
@@ -74,22 +80,86 @@ Inherits MCPKit.Tool
 		    Call App.IDE.SendAndReceive("DoCommand(""DeleteSelection"")", 5000)
 		  End If
 
-		  // 3. Gone?
-		  If Reaches(itemPath) Then
+		  // 3. Gone? DeleteSelection suppresses the output of the script that follows it, so the
+		  //    first check often goes unanswered - which is not evidence either way. Ask again
+		  //    until the IDE answers. Reporting an unanswered check as success is exactly the
+		  //    bug this tool used to have; treating it as failure would send every macOS member
+		  //    delete down the file route unnecessarily.
+		  If StillPresent(itemPath) Then
 		    If navigatorItem <> "" Then
 		      Return MCPKit.ToolResult.Failure("The item is still present, so nothing was deleted: " + _
 		      itemPath + ". Delete it in the IDE instead.")
 		    End If
 
-		    Return MCPKit.ToolResult.Failure("Members cannot be deleted through IDE scripting on this " + _
-		    "platform, and " + itemPath + " is still present. Nothing was deleted. Remove it on disk " + _
-		    "instead: delete its #tag Method (or #tag Property) block from the containing .xojo_code " + _
-		    "file, then call revert_project. Do not call save_project first, or the IDE will write its " + _
-		    "own copy back over the edit.")
+		    // The IDE could not remove it - DeleteSelection is not implemented on Windows - so
+		    // take the route a human would: cut the member's #tag block out of the file and
+		    // reload. ProjectSource.Load saves first, so the file matches the IDE before it is
+		    // edited, and the reload afterwards is what stops the IDE writing the member back.
+		    Return DeleteViaFile(itemPath)
 		  End If
 
 		  Return MCPKit.ToolResult.Success("Deleted: " + itemPath + ". This is not saved to disk yet - " + _
 		  "revert_project restores it, save_project makes it permanent.")
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function StillPresent(itemPath As String) As Boolean
+		  /// Whether the item can still be reached, asked until the IDE actually answers.
+		  ///
+		  /// A delete leaves the next script's output suppressed, so a single check frequently
+		  /// comes back unanswered. That is not evidence of anything: treating it as gone
+		  /// invents a success, and treating it as present sends a working delete down the
+		  /// fallback path. So ask again, and only conclude from an answer.
+
+		  For attempt As Integer = 1 To 4
+		    Var answered As Boolean
+		    Var reachable As Boolean = Reaches(itemPath, answered)
+		    If answered Then Return reachable
+
+		    Thread.SleepCurrent(400)
+		  Next attempt
+
+		  // Never answered. Assume it is still there rather than claim a deletion.
+		  Return True
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function DeleteViaFile(itemPath As String) As MCPKit.ToolResult
+		  /// Removes a member by editing the project file, then reloads so the IDE agrees.
+
+		  Var loadError As String
+		  Var note As String
+		  Var project As XKProject = ProjectSource.Load(loadError, note)
+		  If project = Nil Then
+		    Return MCPKit.ToolResult.Failure("The IDE cannot delete a member on this platform, and " + _
+		    "the project files could not be read to do it directly: " + loadError + " Nothing was deleted.")
+		  End If
+
+		  Var editError As String
+		  If Not ProjectSource.RemoveMemberFromFile(project, itemPath, editError) Then
+		    Return MCPKit.ToolResult.Failure("The IDE cannot delete a member on this platform, and " + _
+		    "editing the file directly did not work: " + editError + " Nothing was deleted.")
+		  End If
+
+		  // The member is gone from disk but the IDE still holds it. Reload, or the next save
+		  // writes it straight back.
+		  Var reverter As New RevertProject
+		  Var noArgs() As MCPKit.ToolArgument
+		  Var reload As MCPKit.ToolResult = reverter.Run(noArgs)
+
+		  If StillPresent(itemPath) Then
+		    Return MCPKit.ToolResult.Failure("Removed " + itemPath + " from the project file, but the " + _
+		    "IDE still has it - the reload did not take. Call revert_project, and do not call " + _
+		    "save_project first or the member will be written back.")
+		  End If
+
+		  Return MCPKit.ToolResult.Success("Deleted: " + itemPath + ". The IDE cannot delete a member " + _
+		  "on this platform, so its block was removed from the project file and the project reloaded. " + _
+		  "This one IS on disk already, unlike a delete the IDE performs - use source control to undo it.")
 
 		End Function
 	#tag EndMethod
@@ -179,7 +249,7 @@ Inherits MCPKit.Tool
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
-		Private Function Reaches(target As String) As Boolean
+		Private Function Reaches(target As String, ByRef answered As Boolean) As Boolean
 		  /// Whether the IDE can navigate to this path, which is how existence is tested both
 		  /// before and after the delete. Assigning Location reaches methods and properties;
 		  /// SelectProjectItem is the fallback for folders. A bad path leaves Location alone,
@@ -198,11 +268,20 @@ Inherits MCPKit.Tool
 		  "  Print ""no""" + EndOfLine + _
 		  "End If"
 
+		  answered = False
+
 		  Var response As JSONItem = App.IDE.SendAndReceive(script)
 		  If response = Nil Or Not response.HasKey("response") Then Return False
 
 		  Var resp As Variant = response.Value("response")
 		  If resp.Type <> Variant.TypeString Then Return False
+
+		  // Only now is the answer trustworthy. Before this flag existed, an IDE that did not
+		  // reply was indistinguishable from an item that was gone - and since DeleteSelection
+		  // suppresses the output of the script that follows it, that is exactly what happened
+		  // after a delete: the check went unanswered and the tool reported a success it had
+		  // not achieved.
+		  answered = True
 
 		  Return resp.StringValue.Trim = "ok"
 
