@@ -42,7 +42,7 @@ Binary projects (`.xojo_binary_project`) cannot be read at all - the format is n
 
 **`save_project` does not migrate anything.** Saving a legacy API 1 project through XMCP leaves it API 1: the file comes back byte-identical, window blocks stay `Window` rather than `DesktopWindow`, and API 1 control types are untouched. Verified on a 40-control API 1 project by comparing md5 before and after. Opening a project in a newer Xojo does not convert it either. If a project looks part-migrated, it already was.
 
-**Known gap: an external item inside an XML project is not read.** `describe_item` reports it as not found in the project files while `list_project_items` lists it, because the IDE knows it and the file reader does not follow the reference yet. External items in a *text* project are read normally.
+**External items are read, in both project formats.** An external item lives outside the project - the project only holds a reference to it - and both the text and XML formats are followed now. Two things to expect: a *binary* external (`.xojo_binary_code`) cannot be read, and `describe_item` says so rather than calling the item empty; and an external file that is missing on this machine is reported as missing, since an external can be absent from a checkout that does not include it.
 
 ### 1. `list_project_items` does not list a class's members
 
