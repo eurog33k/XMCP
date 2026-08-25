@@ -41,6 +41,10 @@ A path that does not exist is reported as `ERROR: Could not navigate to: ...` ra
 
 `lookup_class` returns Xojo's shipped documentation verbatim. If a member the compiler accepts is missing from it, the documentation omits it - the compiler is authoritative, not the tool. Do not tell the user their code will not compile on the strength of a doc lookup.
 
+**Folders cannot be selected.** IDE scripting has no way to select a folder: `SelectProjectItem` returns False for one and `Location` will not take it, even though `list_project_items` lists its contents perfectly well. So `select_project_item` and `delete_project_item` fail on a folder path - the latter says so specifically rather than claiming the folder does not exist.
+
+**`constant_value` needs a qualified name.** `App.kVersion` works; a bare `kVersion` resolves only against whatever is selected in the Navigator and usually returns nothing. Folder names are not part of the path.
+
 **Overloads are the exception.** A name with several signatures - `Module1.GetFileExtention(f As FolderItem)` and `Module1.GetFileExtention(s As String)` - resolves to one of them, with nothing in the result saying which, and there is no way to name a signature. When you know a method is overloaded, read the `.xojo_code` file on disk to see every version.
 
 ### 2. Window event handlers cannot be accessed via IDE tools
