@@ -57,8 +57,16 @@ Inherits MCPKit.Tool
 
 		  If navigatorItem <> "" Then
 		    // A project item. Guard: the Navigator must be sitting on this exact item.
+		    //
+		    // ProjectItem answers with the FOLDER-QUALIFIED name - "Tools.EstimateRequestCost" for
+		    // an item XMCP addresses as "EstimateRequestCost", since folder names are not part of a
+		    // path anywhere else in this tool set. Comparing the two as equals refused every
+		    // top-level item that lives in a folder, which in a real project is most of them. Only
+		    // the leaf is compared, which still catches what this guard exists for: if
+		    // SelectProjectItem failed and left the Navigator on the parent, the parent's own name
+		    // is the leaf and it does not match.
 		    Var expected As String = LastPathComponent(itemPath)
-		    If navigatorItem <> expected Then
+		    If LastPathComponent(navigatorItem) <> expected Then
 		      Return MCPKit.ToolResult.Failure("Refusing to delete: the IDE reports """ + navigatorItem + _
 		      """ selected in the Navigator, not """ + expected + """. Nothing was deleted.")
 		    End If
