@@ -20,6 +20,7 @@ XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP re
 2. Enable the target you want under **Build Settings** (macOS and/or Windows), then build (Build > Build)
 3. Note the path to the built binary — `XMCP` on macOS, `XMCP.exe` on Windows
 4. Copy `src/usage-guide.md` next to the binary so XMCP can serve it as an MCP resource
+5. On macOS, re-sign afterwards: `codesign --force --sign - /path/to/XMCP` — Xojo signs the build folder ad hoc, and adding the guide to it invalidates that signature. macOS then kills the binary on launch with `Killed: 9` and no output
 
 **On Windows**, a Xojo console build produces `XMCP.exe` alongside `XojoConsoleFramework64.dll`, the MSVC redistributable DLLs, and an `XMCP Libs` folder of plugin DLLs (`RegExx64.dll` and friends). Keep the whole folder together and point your MCP client at the `.exe` in place — moving the `.exe` on its own will leave it unable to start.
 

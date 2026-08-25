@@ -19,7 +19,18 @@ This is a **Xojo native application** — there is no Makefile, npm, or shell-ba
 
 **Stamp the build number before a build anyone else will run.** Set `NonRelease` in `src/XMCP.xojo_project` to `git rev-list --count HEAD`, then `revert_project` and build. The MCP handshake reports `Major.Minor.Sub.NonRelease`, so that number is what identifies a binary — without it every build of 1.3 announces itself as `1.3.0` and the only way to tell two apart is the file size on disk, which has already caused real confusion. The stamp names the commit it was built from, so it lags HEAD by the stamping commit itself. Xojo's own `AutoIncrementVersionInformation` does not work here: the counter lives in the manifest only once saved, and every `revert_project` resets it, so every build came out `.1`.
 
-**A build only reaches a client on restart.** Building writes the binary; the client keeps running the old one until its session restarts. Deploying means build → copy the binary *and* `usage-guide.md` → restart the client.
+**A build only reaches a client on restart.** Building writes the binary; the client keeps running the old one until its session restarts. Deploying means build → copy → **re-sign** → restart the client:
+
+```bash
+SRC="src/Builds - XMCP/macOS Universal/XMCP"
+rm -rf "/Applications/XMCP/XMCP Libs" /Applications/XMCP/_CodeSignature
+cp -R "$SRC/XMCP" "$SRC/XMCP Libs" "$SRC/_CodeSignature" /Applications/XMCP/
+cp src/usage-guide.md /Applications/XMCP/usage-guide.md
+codesign --force --sign - /Applications/XMCP      # the step that is easy to miss
+codesign -v /Applications/XMCP                    # must exit 0
+```
+
+Xojo signs the build folder ad hoc, so **anything copied into it afterwards invalidates the signature** — `usage-guide.md` is deliberately placed next to the binary, which is exactly what breaks it. macOS then kills the process on launch with `Killed: 9` and no output, and on a machine running endpoint security this is enforced hardest under `/Applications`; the identical folder runs fine from a home directory, which makes it look like a path problem rather than a signing one. Verify by piping an `initialize` request to the installed binary and checking that a `serverInfo` line comes back — a copy that cannot start looks exactly like a copy that was never replaced.
 
 There are no automated tests or linting tools; validation happens through Xojo IDE's built-in compiler and manual integration testing with an MCP client.
 
