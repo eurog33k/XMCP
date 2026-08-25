@@ -239,6 +239,28 @@ Protected Module ProjectSource
 		      If m.Name.Lowercase = leaf Then found.Add(m)
 		    Next m
 
+		    // A control, named on its own. The Windows session found the odd shape this leaves:
+		    // Window1.Timer1.Action resolved while Window1.Timer1 did not, so the child was
+		    // reachable and its parent was not, and the parent is printed in the listing.
+		    //
+		    // Decided rather than carved out of the rule, because the next person applying the
+		    // invariant would otherwise have to guess which way it was meant: a control DOES
+		    // resolve, and answers with itself and everything it handles. That is what asking
+		    // about a control means - it has no body of its own, but the handlers under it are
+		    // exactly what a caller wants when they name it.
+		    For Each c As XKControl In win.Controls
+		      If c.Name.Lowercase <> tail Then Continue
+		      
+		      found.Add(c)
+		      
+		      For Each g As XKControlEventGroup In win.ControlEventGroups
+		        If g.ControlName.Lowercase <> tail Then Continue
+		        For Each ev As XKEvent In g.Events
+		          found.Add(ev)
+		        Next ev
+		      Next g
+		    Next c
+
 		    Return found
 		  End If
 
@@ -278,10 +300,11 @@ Protected Module ProjectSource
 		  Next n
 
 		  // The invariant this function keeps failing to hold: anything DescribeMembers or
-		  // DescribeWindow prints BY NAME must be findable by that name. Three separate builds have
-		  // each added one collection here after someone hit the gap, so the loops are kept in the
-		  // same order as the display code above them. Adding a collection to either list without
-		  // the other is the bug.
+		  // DescribeWindow prints BY NAME must be findable by that name - including a control, which
+		  // resolves to itself plus its handlers rather than being excluded for having no body.
+		  // Three separate builds each added one collection here after someone hit the gap, so the
+		  // loops are kept in the same order as the display code above them. Adding a collection to
+		  // either list without the other is the bug.
 		  Return found
 
 		End Function
@@ -738,6 +761,15 @@ Protected Module ProjectSource
 
 		  If member IsA XKNote Then
 		    Return XKNote(member).Name + "  (note)"
+		  End If
+
+		  If member IsA XKControl Then
+		    Var c As XKControl = XKControl(member)
+		    Var kind As String = c.ControlType
+		    If kind = "" Then kind = "control"
+		    // No promise about handlers: a control may have none, and the matches that follow are
+		    // numbered, so their presence speaks for itself without a line claiming it.
+		    Return c.Name + "  (" + kind + " control)"
 		  End If
 
 		  If member IsA XKConstant Then

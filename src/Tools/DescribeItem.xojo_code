@@ -92,9 +92,27 @@ Inherits MCPKit.Tool
 		  If matches.Count = 1 Then
 		    out.Add(location + " in " + ownerPath)
 		  Else
-		    out.Add(location + " is overloaded - " + matches.Count.ToString + " declarations in " + _
-		    ownerPath + ". get_code returns whichever the IDE resolves the bare name to, which is " + _
-		    "the first declared; the file order is below.")
+		    // "Overloaded" is only true when the matches are all methods. A control comes back with
+		    // its handlers, which is several matches and not an overload at all - calling that
+		    // "2 declarations, get_code returns the first" would describe something that is not
+		    // happening, which is the exact failure mode this tool has been corrected for twice.
+		    Var allMethods As Boolean = True
+		    For Each candidate As Variant In matches
+		      If Not (candidate IsA XKMethod) Then
+		        allMethods = False
+		        Exit
+		      End If
+		    Next candidate
+		    
+		    If allMethods Then
+		      out.Add(location + " is overloaded - " + matches.Count.ToString + " declarations in " + _
+		      ownerPath + ". get_code returns whichever the IDE resolves the bare name to, which is " + _
+		      "the first declared; the file order is below.")
+		    Else
+		      out.Add(location + " matches " + matches.Count.ToString + " items in " + ownerPath + _
+		      ", of different kinds - a control is listed with the handlers under it. Each is shown " + _
+		      "below with what it is.")
+		    End If
 		  End If
 		  out.Add("")
 
