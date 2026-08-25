@@ -94,7 +94,8 @@ Then "save it" → `save_project` if you want it on disk.
 **Build and run.** "Build it" → `build_project`. Omit the build type and it targets the platform
 you are on; pass one to cross-compile (`19` Windows 64-bit Intel, `9` macOS Universal,
 `17` Linux 64-bit Intel — the full table is in the tool's description). "Run it" → `run_project`,
-and `stop_project` to end the debug session.
+and `stop_project` to end the debug session — which confirms the app really exited, and terminates
+the process itself if the IDE couldn't (the IDE's Kill command doesn't stop a console debug build).
 
 **Ask what something contains.** "What's in `IDECommunicator`?" → `describe_item` lists every method
 with its signature and scope, plus properties, constants and enums. On a window it also lists the

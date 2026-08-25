@@ -10,7 +10,7 @@ XMCP gives you direct control over the Xojo IDE via 26 tools (25 on Windows — 
 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
-- **Build and run**: `build_project`, `run_project`, `stop_project`
+- **Build and run**: `build_project`, `run_project`, `stop_project` — `stop_project` verifies the app actually exited and terminates it directly if the IDE could not, because the IDE's Kill command does not stop a console debug build
 - **Save**: `save_project` — writes the IDE's in-memory project to disk. Call this after `set_code`, `create_project_item`, `constant_value` or `get_item_description` so your changes reach disk
 - **Create items**: `create_project_item`
 - **Inspect and modify**: `get_item_description`, `constant_value`, `get_project_info`, `revert_project`

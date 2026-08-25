@@ -171,7 +171,9 @@ Runs the current Xojo project in debug mode.
 
 #### `stop_project`
 
-Stops the currently running debug session.
+Stops the currently running debug session, and verifies it stopped.
+
+The IDE's `DoCommand "Kill"` stops a desktop app but **leaves a console debug build running**, reporting nothing either way. So this asks the IDE first, then checks whether a debug build of the open project (an executable under the project folder whose path contains `.debug`) is still alive, and terminates that process directly if so. It reports which of the two routes worked, and skips XMCP's own executable so it can never stop the server answering the call.
 
 *No parameters.*
 
