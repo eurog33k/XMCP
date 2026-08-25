@@ -749,9 +749,15 @@ Protected Module ProjectSource
 		    Var en As XKEnum = XKEnum(member)
 		    Var values() As XKEnumValue = en.Values
 		    
+		    // Each value with the number it carries. Names alone left the numbering invisible:
+		    // an enum value's ordinal is real information when it is stored in a database column
+		    // or a file format, and until now the implicit ones - which the reader has to work out
+		    // rather than read - could not be checked against the source by anyone using this
+		    // tool. A fact the tool computes and never shows is the shape of every other bug in
+		    // this sequence.
 		    Var names() As String
 		    For Each v As XKEnumValue In values
-		      names.Add(v.Name)
+		      names.Add(v.Name + " = " + v.Value.ToString)
 		    Next v
 		    
 		    Var text As String = ScopePrefix(en.Flags) + en.Name + "  (enum"
