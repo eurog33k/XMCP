@@ -40,6 +40,10 @@ Consequences worth holding on to:
 
 Binary projects (`.xojo_binary_project`) cannot be read at all - the format is not text. Save as Text or XML, which is what you want for version control anyway. Individual items are a separate question from the project format: a text project can hold external items written as XML (`.xojo_xml_code`, `.xojo_xml_window`), which is the usual shape for code shared between projects, and those are read too.
 
+**`save_project` does not migrate anything.** Saving a legacy API 1 project through XMCP leaves it API 1: the file comes back byte-identical, window blocks stay `Window` rather than `DesktopWindow`, and API 1 control types are untouched. Verified on a 40-control API 1 project by comparing md5 before and after. Opening a project in a newer Xojo does not convert it either. If a project looks part-migrated, it already was.
+
+**Known gap: an external item inside an XML project is not read.** `describe_item` reports it as not found in the project files while `list_project_items` lists it, because the IDE knows it and the file reader does not follow the reference yet. External items in a *text* project are read normally.
+
 ### 1. `list_project_items` does not list a class's members
 
 `list_project_items` shows contained project *items* — the classes and modules inside a folder or module — not the methods, properties or events inside a class. Listing a class often returns `{}`.

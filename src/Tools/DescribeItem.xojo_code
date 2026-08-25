@@ -67,9 +67,17 @@ Inherits MCPKit.Tool
 
 		  If matches.Count = 0 Then
 		    If ownerPath = "" Then
-		      Return MCPKit.ToolResult.Failure("No item or member found at: " + location + _
-		      ". Folder names are not part of the path, and the project must be saved in Text or " + _
-		      "XML format for its files to be readable.")
+		      // Say what was actually searched, and do not repeat advice that cannot apply. This
+		      // message used to assert two things that were often false at once: that the item
+		      // does not exist, when list_project_items shows it perfectly well, and that the
+		      // project needs saving as Text or XML, on a project that already was. That sent a
+		      // reader after the wrong problem for two rounds.
+		      Return MCPKit.ToolResult.Failure("Not found in the project files: " + location + _
+		      ". The IDE may still know it - list_project_items asks the IDE, this reads the files, " + _
+		      "and the two can disagree. Most likely causes, in order: the item is EXTERNAL, and an " + _
+		      "external item inside an XML project is not followed yet; folder names are not part of " + _
+		      "a path, so drop them; the item exists only in the IDE and has not been saved; or the " + _
+		      "path is misspelt. " + note)
 		    End If
 
 		    Var pathParts() As String = location.Split(".")
