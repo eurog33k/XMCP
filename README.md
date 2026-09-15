@@ -2,7 +2,9 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants direct control over the [Xojo IDE](https://www.xojo.com). Built in Xojo using [MCPKit](https://github.com/gkjpettet/MCPKit) by Garry Pettet.
 
-XMCP connects to the Xojo IDE via its IPC socket and exposes 26 tools (25 on Windows, where `get_system_log` has no equivalent) that let an AI navigate projects, read and write code, build, run and save projects, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
+XMCP connects to the Xojo IDE via its IPC socket and exposes 34 tools (33 on Windows, where `get_system_log` has no equivalent) that let an AI navigate projects, read and write code, build, run and save projects, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, read debug logs and system output, and estimate request cost - all through the standard MCP protocol over stdin/stdout.
+
+XMCP is built Xojo-first: the IDE tools, the bundled documentation search, and the `examples/` reference templates all exist because the author is a Xojo developer. But nothing in its architecture is Xojo-*only* — the documentation layer (see [Adapting XMCP to your stack](#adapting-xmcp-to-your-stack)) works for any language with a Dash/Zeal docset, and a project working in multiple languages can register several at once.
 
 XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP resource. Compatible clients (e.g. Claude Code) fetch it automatically at session start, giving the AI immediate awareness of XMCP's capabilities, known IDE scripting limitations, and fallback strategies — without any extra configuration. You can edit the file to add project-specific notes without rebuilding.
 
@@ -61,6 +63,14 @@ XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP re
   }
 }
 ```
+**OpenAI Codex CLI** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.xmcp]
+command = "/path/to/XMCP"
+```
+
+Any other MCP-capable client works the same way — XMCP speaks standard MCP over stdin/stdout, so point the client at the binary as its server command.
 
 To specify a custom documentation path:
 
@@ -70,6 +80,22 @@ To specify a custom documentation path:
     "xmcp": {
       "command": "/path/to/XMCP",
       "args": ["--docs-path", "/path/to/Documentation"]
+    }
+  }
+}
+```
+
+To register one or more third-party `.docset` bundles (repeat the flag per bundle — see [Adapting XMCP to your stack](#adapting-xmcp-to-your-stack)):
+
+```json
+{
+  "mcpServers": {
+    "xmcp": {
+      "command": "/path/to/XMCP",
+      "args": [
+        "--docset-path", "/path/to/PHP.docset",
+        "--docset-path", "/path/to/JavaScript.docset"
+      ]
     }
   }
 }
@@ -86,15 +112,16 @@ XMCP [options]
 | `-h`, `--help` | Show help and list all available tools |
 | `-v`, `--verbose` | Enable verbose debug logging to stderr |
 | `-d`, `--docs-path PATH` | Path to Xojo documentation directory (auto-detected if omitted) |
+| `--docset-path PATH` | Path to a Dash/Zeal-style `.docset` bundle. Repeatable — pass once per bundle. |
 
-The server communicates via JSON-RPC over stdin/stdout following the MCP protocol. It is not meant to be run interactively - it is launched by an MCP client (like Claude Code or Claude Desktop).
+The server communicates via JSON-RPC over stdin/stdout following the MCP protocol. It is not meant to be run interactively - it is launched by an MCP client (like Claude Code, Codex CLI, or Claude Desktop).
 
 You can start XMCP before the Xojo IDE. IDE-dependent tools will return an error until the IDE socket is available.
 XMCP retries both standard socket paths on each IDE request, so tools begin working automatically once the IDE starts.
 
 ## Tools
 
-XMCP exposes 22 MCP tools organized into four categories.
+XMCP exposes 31 MCP tools organized into six categories.
 
 ### IDE Tools
 
@@ -124,7 +151,7 @@ Navigates to a specific item in the Xojo IDE Navigator using a dot-separated pat
 
 #### `get_code`
 
-Reads the source code at the current or specified location.
+Reads the source code at the current location in the IDE editor. The `location` parameter is unreliable — omit it and use the IDE's current selection instead.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -132,7 +159,7 @@ Reads the source code at the current or specified location.
 
 #### `set_code`
 
-Writes source code to the current or specified location. Replaces the entire code content at that location.
+Writes source code to the current location in the IDE editor. Replaces the entire code content at that location. The `location` parameter is unreliable — omit it and use the IDE's current selection instead. Does not save to disk; the user must save manually (Cmd+S).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -274,8 +301,30 @@ Gets or sets the value of a project constant. The constant must already exist in
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `name` | String | Yes | The constant name. Can be simple (e.g. `kVersion`) or fully qualified (e.g. `App.kVersion`). |
+| `name` | String | Yes | The fully-qualified constant name (e.g. `App.kVersion`). A bare name (e.g. `kVersion`) silently fails in the Xojo IDE scripting API — always qualify with the containing module or class. |
 | `value` | String | No | If provided, sets the constant to this value. If omitted, returns the current value. |
+
+#### `save_project`
+
+Saves the current Xojo project to disk. Call this after making changes via `set_code` or other IDE tools to persist them before building or running.
+
+*No parameters.*
+
+#### `analyze_project`
+
+Analyzes the current Xojo project for compile errors and warnings without building. Reports unused variables, type mismatches, deprecated API usage, and other issues. Warnings return as success (they don't block building); errors return as failure.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | String | No | `"project"` (default) — analyze entire project; `"item"` — analyze only the currently selected item. |
+
+#### `debug_control`
+
+Controls an active Xojo debug session. Requires a running debug session started with `run_project`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | String | Yes | One of: `"step_over"`, `"step_into"`, `"step_out"`, `"resume"`, `"pause"`. |
 
 ### Documentation Tools
 
@@ -283,15 +332,43 @@ These tools provide access to the local Xojo documentation, enabling the AI to l
 
 #### `search_docs`
 
-Searches the local Xojo documentation guides and tutorials by keyword. Returns matching sections with surrounding context lines. Use this for conceptual questions about language features, patterns, and best practices. To look up a specific class, method, or property by name, use `lookup_class` instead.
+Searches the local Xojo documentation guides and tutorials. Returns matching sections with title and content. Use this for conceptual questions about language features, patterns, and best practices. To look up a specific class, method, or property by name, use `lookup_class` instead.
+
+`search_docs` searches a RAG database and degrades gracefully through three tiers — no configuration required:
+
+1. **Semantic (hybrid)** — when the RAG database is found *and* the embedding server responds on `localhost:8089` (the [XDOX](https://github.com/o3jvind/XDOX) app manages one automatically while it runs).
+2. **Keyword (BM25)** — when only the database is available: FTS5 full-text search, still high quality.
+3. **Plain text scan** of `llms-full.txt` — last resort when no database exists.
+
+**Database discovery order:** `--db-path` (explicit) → `~/Library/Application Support/dk.o3jvind.xdox/xdox.db` (built and kept up to date by the XDOX app — the recommended setup) → `xojo_rag.db` next to the documentation (legacy XMCP-RAG-Indexer output).
+
+**Multiple Xojo versions:** when XDOX has indexed more than one Xojo version, `search_docs` returns results for the version XDOX currently has active (its status-bar version picker), plus version-independent chunks — the active version is read fresh on every search, so switching it in XDOX takes effect immediately with no restart. Result headers name that version. Legacy databases without per-version data are unaffected.
+
+**Hybrid search pipeline:**
+1. Embeds the query with the local embedding model
+2. Scores all chunks by cosine similarity (vector search)
+3. Scores matching chunks with BM25 (FTS5 full-text search) — catches exact API names that semantic search may miss
+4. Combines: `final = 0.7 × cosine + 0.3 × fts`
+5. Deduplicates chunks from the same source with near-identical scores
+6. Expands context by fetching adjacent chunks for high-scoring matches (score ≥ 0.72)
+7. Returns results sorted logically by document position within each source
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | String | Yes | The search term (e.g. `JSONItem`, `FolderItem`, `database`). |
 | `max_results` | Integer | No | Maximum number of matching sections to return. Default: 5. |
-| `context_lines` | Integer | No | Number of lines of context before and after each match. Default: 10. |
+| `context_lines` | Integer | No | Number of lines of context before and after each match (keyword search only). Default: 10. |
 
-The documentation text is cached in memory after the first search for fast subsequent queries.
+#### `search_notes`
+
+Searches the user's personal Xojo notes, written and curated in the [XDOX](https://github.com/o3jvind/XDOX) app. Notes capture the user's own conventions, hard-won fixes and project-specific knowledge — a complement to the official docs. All notes are searched regardless of which Xojo version is active. Notes marked as version-specific in XDOX and written for an older version are flagged `[possibly outdated — written for Xojo <version>]`; notes marked global (version-independent) are never flagged.
+
+Requires the XDOX database (see discovery order above); against a legacy `xojo_rag.db` the tool responds gracefully that no notes database exists.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | String | Yes | The search term to look for in note titles and bodies. |
+| `max_results` | Integer | No | Maximum number of notes to return. Default: 5. |
 
 #### `lookup_class`
 
@@ -310,6 +387,37 @@ Lists available Xojo documentation topics and pages from the `llms.txt` index. U
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `filter` | String | No | Keyword to filter topics (e.g. `Desktop`, `database`, `networking`). If empty, returns all topics. |
+
+### Docset Tools
+
+These tools search third-party documentation from Dash/Zeal-style `.docset` bundles — the same format used by [Dash](https://kapeli.com/dash) (macOS) and [Zeal](https://zealdocs.org) (Windows/Linux), covering hundreds of languages, frameworks, and libraries via [Dash-User-Contributions](https://github.com/Kapeli/Dash-User-Contributions). Independent of the Xojo-specific documentation tools above — register one or more bundles with `--docset-path` (repeatable) and they're immediately searchable, no restart-time indexing required.
+
+Two on-disk docset layouts are supported: a plain `Contents/Resources/Documents/` HTML tree, and Dash's space-saving `tarix.tgz` archive layout — the latter is extracted once into `~/Library/Application Support/dk.o3jvind.xmcp/docset-cache/` on first read and served from that cache afterward.
+
+#### `list_docsets`
+
+Lists the registered `.docset` bundles by name, with their entry counts. Call this first to discover available docset names before calling `search_docset` or `get_docset_entry`.
+
+*No parameters.*
+
+#### `search_docset`
+
+Searches entry names (class, method, function, guide, etc.) across all registered docsets, or a single one via `docset_name`. Results are grouped by docset when searching all of them.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | String | Yes | The search term to look for (e.g. a class, method, or function name). |
+| `docset_name` | String | No | Limit the search to one registered docset by name (as returned by `list_docsets`). If omitted, all registered docsets are searched. |
+| `max_results` | Integer | No | Maximum number of matching entries to return per docset. Default: 10. |
+
+#### `get_docset_entry`
+
+Reads the full documentation content for a specific entry from a registered docset, as plain text (HTML stripped). Use `search_docset` first to find the exact `entry_name`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `docset_name` | String | Yes | The registered docset to read from (as returned by `list_docsets`). |
+| `entry_name` | String | Yes | The exact entry name to read (as returned by `search_docset`). |
 
 ### Debug Tools
 
@@ -345,15 +453,52 @@ Estimates expected token impact for a proposed request and optionally uses plann
 | `request` | String | Yes | Natural-language request to estimate (for example: `Add a ListBox to Window1`). |
 | `planned_tools` | String | No | Optional comma-separated tool names you expect to call (for example: `select_project_item,create_project_item`). |
 
+### Disk-File Generation and Validation Tools
+
+These tools generate or validate `.xojo_code`/`.xojo_window` `#tag` syntax directly on disk — no IDE socket call, so they work even when the Xojo IDE is closed. Both read their format rules (block ordering, `Flags`/keyword mapping, Constant `Default` escaping) from a machine-readable JSON block embedded in `usage-guide.md`, so a rule fix takes effect on the next tool call with no rebuild.
+
+#### `scaffold_code_block`
+
+Generates a correctly formatted `#tag` block (Method, Property, Constant, Event definition, Shared method, control event handler, or window event handler) for the caller to insert into a file directly, instead of hand-writing `#tag` syntax from memory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `block_kind` | String | Yes | One of: `method`, `property`, `constant`, `event_definition`, `shared_method`, `control_event`, `window_event`. |
+| `name` | String | Yes | Method/property/constant/event name, or the control name for `control_event`. |
+| `visibility` | String | No | `public`, `protected`, or `private`. Applies to `method`/`property`/`shared_method`. Default: `public`. |
+| `event_or_signature` | String | No | Event signature (e.g. `Pressed()`) for `control_event`/`window_event`, or parameter list for `event_definition`. |
+| `constant_type` | String | No | For `constant` only: `String`, `Integer`, `Double`, `Boolean`, or `Color`. Default: `String`. |
+| `default_value` | String | No | For `constant` only: the raw, unescaped default value — this tool escapes it automatically. |
+| `target_file_type` | String | No | `xojo_code` or `xojo_window`. Informational only — escaping is identical for both. Default: `xojo_code`. |
+
+#### `lint_project_file`
+
+Validates a `.xojo_code` or `.xojo_window` file on disk for known structural errors: wrong `#tag` block ordering, `Flags`/keyword mismatches, unclosed or mismatched `#tag`/`#tag End` pairs, and unescaped characters in Constant `Default` values. Call this after editing a file directly on disk and before `revert_project`. Reports errors and warnings; never modifies the file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | String | Yes | Absolute path to the `.xojo_code` or `.xojo_window` file to validate. |
+
 ## Resources
 
-XMCP exposes one MCP resource that AI clients can fetch at session start:
+XMCP exposes MCP resources that AI clients can fetch at session start:
 
-| URI | Name | Description |
-|-----|------|-------------|
-| `file://usage-guide.md` | XMCP Usage Guide | AI-facing guide: capabilities, known limitations, fallback strategies, and tips |
+| URI                        | Name                | Description                                                                                        |
+|----------------------------|----------------------|----------------------------------------------------------------------------------------------------|
+| `file://usage-guide.md`    | XMCP Usage Guide     | AI-facing guide: capabilities, limitations, when to use IDE tools vs. direct file editing, and tips |
+| `file://examples/<name>`   | Example: `<name>`    | One resource per file in `examples/` — reference templates for correct `.xojo_code`/`.xojo_window` structure |
 
-The `usage-guide.md` file is distributed next to the XMCP binary. You can edit it to add project-specific notes or custom conventions without rebuilding. Compatible MCP clients (e.g. Claude Code) fetch it automatically via `resources/list` and `resources/read`.
+Both `usage-guide.md` and `examples/` are distributed next to the XMCP binary and are plain files on disk — no rebuild required to change either. Compatible MCP clients (e.g. Claude Code) fetch them automatically via `resources/list` and `resources/read`.
+
+## Adapting XMCP to your stack
+
+XMCP ships configured for Xojo development: the default `usage-guide.md` biases the AI toward IDE tools and Xojo documentation, and `examples/` holds Xojo reference templates. Nothing about the underlying mechanism is Xojo-specific, though — three parts of XMCP are meant to be edited per project or per developer, not just per Xojo version:
+
+- **`--docset-path`** — register any Dash/Zeal `.docset` bundle (see [Docset Tools](#docset-tools)) to make a language, framework, or library's documentation searchable alongside — or instead of — Xojo's own docs. A project mixing Xojo with an HTML/JS/CSS front end, for example, can register docsets for all three and search whichever is relevant.
+- **`examples/`** — swap the reference templates for whatever the current language or project actually looks like. The mechanism (one MCP resource per file, auto-discovered from the folder) doesn't care what's in it.
+- **`usage-guide.md`** — rewrite the guidance itself: which tools to prefer, in what order, for this particular mix of languages and conventions. It's plain text fetched into the AI's context at session start, not enforced code — treat it as a strong steer, not a guarantee, and back anything that must hold every time (a required namespace, a formatting rule) with a mechanical check like `lint_project_file` instead.
+
+None of this requires touching XMCP's source — a `.xojo_project`-free setup (docsets only, no Xojo IDE running) works fine for the documentation tools; the IDE tools simply return connection errors until a project is opened.
 
 ## Architecture
 
@@ -361,6 +506,8 @@ The `usage-guide.md` file is distributed next to the XMCP binary. You can edit i
 XMCP
 ├── App                    — MCP server entry point, tool registration, docs auto-detection
 ├── IDECommunicator        — IPC socket communication with Xojo IDE (protocol v2)
+├── SemanticSearch         — Optional hybrid search (vector + FTS5, neighbour expansion, cache)
+├── Docset                 — Reads a single Dash/Zeal .docset bundle (SQLite index + HTML/tarix)
 ├── MCPKit/                — MCP protocol framework
 │   ├── ServerApplication  — JSON-RPC stdin/stdout server loop
 │   ├── Tool               — Base class for MCP tools
@@ -369,11 +516,13 @@ XMCP
 │   ├── ToolResult         — Success/Failure result type
 │   ├── OptionParser       — CLI argument parsing
 │   └── Option             — CLI option definition
-└── Tools/                 — 22 MCP tool implementations
-    ├── IDE tools (16)     — Control the Xojo IDE via IPC
+└── Tools/                 — 31 MCP tool implementations
+    ├── IDE tools (19)     — Control the Xojo IDE via IPC
     ├── Doc tools (3)      — Search and browse local Xojo documentation
+    ├── Docset tools (3)   — Search third-party Dash/Zeal .docset bundles
     ├── Debug tools (2)    — Read crash logs and system diagnostic output
-    └── Cost tools (1)     — Estimate request token cost and alternatives
+    ├── Cost tools (1)     — Estimate request token cost and alternatives
+    └── Disk-file tools (2)— Generate/validate .xojo_code/.xojo_window syntax
 ```
 
 ### IDE Communication
@@ -471,6 +620,7 @@ On startup, XMCP scans `SpecialFolder.ApplicationData/Xojo/Xojo/` - `~/Library/A
 - **Linux is untested** — the path resolution in `Platform.xojo_code` covers it, but nothing has been verified on Linux.
 - **IDE tools require an open project** — the Xojo IDE scripting socket must be available and a project must be loaded.
 - **Documentation tools require local docs** — depend on `llms-full.txt`, `llms.txt`, and `_sources/*.rst.txt` files shipped with the Xojo IDE.
+- **Docset tools require registered bundles** — `list_docsets`, `search_docset`, and `get_docset_entry` return an error until at least one `--docset-path` is supplied; a docset shipped as a `tarix.tgz` archive is extracted to a local cache on first read, which can take a few seconds for a large bundle.
 - **`get_code`, `set_code`, `get_selected_text`, `set_selected_text` require a method or property to be active** — these tools operate on the code editor view. If the selected item in the Navigator is a class, module, or folder (not a method, property, or other code item), they return an error: `No code editor is active. Navigate to a method or property first.`
 - **`list_project_items` does not list a class's members** — it enumerates contained project *items*, so listing a class usually returns `{}`. Navigate to members by name instead: `select_project_item`, `get_code` and `set_code` accept full dot-separated paths and reach methods, properties and event implementations. (These navigate by assigning the IDE's `Location`, which reaches members; the `SelectProjectItem` scripting function alone cannot, and is kept only as a fallback for folders.)
 - **IPC socket timing after navigation** — the Xojo IDE briefly closes its IPC socket (~2–3 seconds) after certain navigation operations. XMCP handles this with automatic retries (up to 5 × 1 second), so tools work reliably, but sequential IDE calls may take a few seconds longer after navigation.

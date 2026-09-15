@@ -1,32 +1,29 @@
 #tag Class
-Protected Class GetSelectedText
+Protected Class ListDocsets
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("get_selected_text", "Returns the currently selected text in the Xojo IDE code editor, along with the selection start position and length.")
+		  Super.Constructor("list_docsets", "Lists the Dash/Zeal .docset bundles registered via --docset-path, with their entry counts. Use this first to discover available docset names before calling search_docset or get_docset_entry.")
 
 		End Sub
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
 		Function Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult
-		  #Pragma Unused args
-
-		  Var script As String = _
-		  "Try" + EndOfLine + _
-		  "  Dim s As String = SelectedText" + EndOfLine + _
-		  "  Dim ss As Integer = SelectionStart" + EndOfLine + _
-		  "  Dim sl As Integer = SelectionLength" + EndOfLine + _
-		  "  Print ""start="" + Str(ss) + "" length="" + Str(sl) + Chr(10) + s" + EndOfLine + _
-		  "Catch" + EndOfLine + _
-		  "  Print ""ERROR: No code editor is active. Navigate to a method or property first.""" + EndOfLine + _
-		  "End Try"
-
-		  If App.IDE = Nil Then
-		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
+		  If App.Docsets = Nil Or App.Docsets.Count = 0 Then
+		    Return MCPKit.ToolResult.Failure("No docsets configured. Use --docset-path to register one or more Dash/Zeal .docset bundles.")
 		  End If
 
-		  Return App.IDE.RunScript(script)
+		  Var lines() As String
+		  For Each ds As Docset In App.Docsets
+		    If ds.HasDatabase Then
+		      lines.Add(ds.DocsetName + " — " + ds.EntryCount.ToString + " entries")
+		    Else
+		      lines.Add(ds.DocsetName + " — unavailable (could not open docSet.dsidx)")
+		    End If
+		  Next ds
+
+		  Return MCPKit.ToolResult.Success(String.FromArray(lines, EndOfLine))
 
 		End Function
 	#tag EndMethod

@@ -2,7 +2,10 @@
 
 All notable changes to XMCP will be documented here.
 
-## [Unreleased]
+## [1.11.0] - Unreleased
+
+### Merged
+- **Merged upstream 1.10.1** (o3jvind/XMCP) into the windows-support line. Everything below `[1.10.1]` in this file is upstream's history; the `[1.3.0] - 2026-08-24` section is this fork's. Nine upstream tools arrive with it: `analyze_project`, `debug_control`, `scaffold_code_block`, `lint_project_file`, `search_notes`, `list_docsets`, `search_docset`, `get_docset_entry`, and its `save_project` is replaced by the fork's, which verifies the save through `ProjectShellPath`. Upstream's `IDECommunicator.RunScript` is kept, rebuilt on the fork's reply classifier; upstream's `DoCommand "BuildApp"` build is not, since `Print BuildApp(type, reveal)` returns a verifiable path where `DoCommand` answers `{}` for success and for an ignored target alike. The stdin loop is upstream's buffered `ReadAll` version with the fork's LF-only output, which Windows clients need.
 
 ### Fixed
 - **A reply split over several messages was answered by whichever part arrived first.** The IDE sends a script's `Print` output and a compiler warning about that script as two messages under one tag, about a millisecond apart, and an analysis sends its `buildError` and the `Print` sentinel together. `IDECommunicator` returned on the first frame that carried the tag, so a warning could displace the output and a sentinel could displace the diagnostics. It now keeps reading for a short window after the first match - longer when that first part is only a warning, since the real output is then still coming - and merges the parts: an error part wins, otherwise the output, and a warning is the answer only when it is all there is. The other parts stay attached, so `run_ide_script` now reports a compiler warning *alongside* the output it accompanied. Learned from `xojoctl`, which measured the split
@@ -43,11 +46,170 @@ All notable changes to XMCP will be documented here.
 - **`select_project_item` gave a folder the method-level explanation** — and a workaround (`get_code`) that cannot apply to one. It now works out which condition it hit
 - **Event handlers printed as bare names** in all three places that list them, dropping their parameters without saying so; `UserInterfaceUpdate(data() As Dictionary)` appeared as `UserInterfaceUpdate`
 - **`create_project_item` rejects `AddEventImplementation`** instead of stalling. Xojo documents it; it never answers and blocks the connection for the full timeout, after which nothing has been created. The refusal names the file-editing route to an event handler instead
-
-### Changed
 - **The version identifies the build.** `NonRelease` is stamped from the commit count and the MCP handshake reports four components (`1.3.0.34`), so two binaries can be told apart without comparing file sizes
 
-## [1.3.0] - 2026-08-24
+## [1.10.1] - 2026-09-08
+
+### Fixed
+- **`OptionParser.ArrayValue`**: no longer throws `TypeMismatchException` when an array-type option (e.g. `--docset-path`) was never supplied on the command line. The unset option's `Value` holds a scalar empty-string `Variant`, and assigning it directly into a `Variant()` array crashed the whole server at startup — including in MCP clients like Claude Desktop, whose config invokes XMCP with no arguments at all. Fixed by checking `o.WasSet` before reading `o.Value`, so an unset array option now correctly yields an empty array.
+
+## [1.10.0] - 2026-09-07
+
+### Added
+- **`list_docsets`, `search_docset`, `get_docset_entry`**: search third-party documentation from Dash/Zeal-style `.docset` bundles, registered via one or more `--docset-path` flags. `list_docsets` lists registered bundles with entry counts; `search_docset` searches entry names across all or one docset (`docset_name` parameter); `get_docset_entry` reads a specific entry's HTML content, stripped to plain text. Independent of `search_docs`/`lookup_class`, which remain Xojo-specific.
+- New `Docset.xojo_code` class wraps a single `.docset` bundle's SQLite `searchIndex` table and HTML `Documents/` tree, following the same lazy-probe pattern as `SemanticSearch` so an unreadable bundle degrades gracefully instead of failing startup.
+- **Tarix-packed docsets**: some Dash distributions (e.g. AppleScript) ship no `Documents/` folder at all, only a `Contents/Resources/tarix.tgz` archive. `Docset` now shells out to the system `tar` to extract such an archive once into `~/Library/Application Support/dk.o3jvind.xmcp/docset-cache/<name>/` on first `get_docset_entry` call, then reads from the cache thereafter. Xojo's built-in `FolderItem.Unzip`/`.Zip` only cover the ZIP format, not tar+gzip, so this is the only dependency-free option (the alternative, MBS's Compression/Archive plugin, would add a new project-wide dependency).
+
+## [1.9.1] - 2026-09-06
+
+### Fixed
+- **`IDECommunicator.RunScript`**: stopped re-parsing string tool output as JSON to look for `scriptError`/`buildError` keys. No `RunScript` caller ever emits that shape (only `DoCommand "RunApp"`/`"BuildApp"` do, and they bypass `RunScript` and call `SendAndReceive` directly) — the check only ever misclassified legitimate text as a failure, e.g. a constant value or item description whose content happened to contain the literal text `{"buildError":...}`. Also normalizes an empty-object IDE response (`{}`) back to `""`.
+- **`Tool.BuildStringVariableScript`** (shared by `constant_value`, `get_item_description`, `set_code`, `set_selected_text`): rebuilt to split on CRLF/CR/LF individually and join segments with explicit `Chr(13)`/`Chr(10)` separators, instead of splitting only on `EndOfLine` (LF-only on macOS) and appending `+ EndOfLine` after every element. This fixed three related bugs: a value already ending in a line break got an extra blank line appended on write; a lone CR left a raw control byte inside a generated script's string literal, which could break the script's syntax; and `constant_value`'s read-back verification compared against the same corrupted value it had just written, so neither bug was ever caught by the "did the write take effect" check.
+- **`scaffold_code_block`**: `EscapeConstantDefault` now normalizes CRLF and lone CR to LF before escaping a constant `Default` value. Previously a lone CR was silently deleted by the `constant_escape` table's `"\r" -> ""` entry (corrupting the value), and any line break split the generated `#tag Constant` line, producing an invalid definition. `usage-guide.md`'s `constant_escape` table now also maps `\n` to the `.xojo_window`-style `\n` escape.
+- **`ServerApplication`**: `RequestID` is now reset to `Nil` before parsing each stdin line, so a JSON parse failure correctly reports `id: null` per the JSON-RPC spec instead of reusing the previous successful request's id.
+
+## [1.9.0] - 2026-09-06
+
+### Added
+- **`scaffold_code_block`**: generates a correctly formatted `#tag` block (Method, Property, Constant, Event definition, Shared method, control event handler, or window event handler) for the caller to insert directly into a `.xojo_code`/`.xojo_window` file, instead of hand-writing `#tag` syntax from memory.
+- **`lint_project_file`**: validates a `.xojo_code`/`.xojo_window` file on disk for the four known failure modes — wrong `#tag` block ordering, `Flags`/keyword mismatches, unclosed or mismatched `#tag`/`#tag End` pairs, and unescaped characters in Constant `Default` values. Reports errors and warnings; never modifies the file.
+- Both tools read their format rules from a machine-readable JSON block embedded in `usage-guide.md` (`FormatRules.xojo_code`), so a rule fix or newly discovered edge case takes effect on the next tool call — no rebuild required.
+- `src/examples/` is now itself a real, buildable Xojo Desktop project (`Examples.xojo_project`), rebuilt entirely from IDE-generated content. Previously the reference templates were static, hand-authored text that was never compiled or validated by the Xojo IDE.
+
+### Fixed
+- Two silent, previously undetected bugs in the `examples/` reference templates, found only because they are now IDE-validated: `App.xojo_code`'s `Inherits Application` was deprecated API 1 (fixed to `Inherits DesktopApplication`); a hand-written Constant `Default` value with an unescaped opening quote compiled without error but silently dropped the value's first character at runtime.
+- `Window (deprecated class)`'s `Close` event name corrected to the API 2 `Closing` in the `DetailWindow` example, which had carried the deprecated name.
+
+### Notes
+Building and testing the two new tools surfaced several previously undocumented Xojo behaviors, now recorded in `CLAUDE.md`:
+- The bare `Tab` identifier is invalid in a Console Application target and produces a cascade of confusing, unrelated-looking compile errors.
+- `String.BeginsWith` and `String.IndexOf` are case-insensitive by default in this Xojo version — this broke `#tag` scanning against Xojo's own `#Tag Instance, Platform = ...` per-platform Constant override syntax until fixed with explicit `ComparisonOptions.CaseSensitive`.
+- `.xojo_code` Constant `Default` values use the same escape table as `.xojo_window` (`\x2C`, `\x3D`, `\'`, `\xHH`) for comma/equals/apostrophe/non-ASCII — not the simpler `""`-doubling previously assumed.
+- A custom event definition inside a class body is serialized by the IDE as `#tag Hook`, not `#tag Event` — `#tag Event` is reserved for overriding an already-inherited event.
+
+## [1.8.1] - 2026-08-14
+
+### Fixed
+- **Retrieval scoring kept in sync with XDOX's MBS docset support**: XDOX now
+  indexes the MBS Xojo Plugins documentation under its own `docs_version`
+  sentinel (`"mbs"`) instead of the version-independent `''`, so `SemanticSearch`'s
+  version filters (`KeywordSearch`, hybrid vector search) are updated to include
+  `docs_version = "mbs"` alongside the active Xojo version — without this, MBS
+  chunks would have silently dropped out of `search_docs`/`lookup_class` results
+  once XDOX's own filter changed. Also ported XDOX's class-name-exact-match score
+  boost (`ExtractClassName`): cosine similarity alone doesn't reliably separate
+  similarly-named MBS classes (e.g. `DesktopWKWebViewControlMBS` vs
+  `DesktopWebView2ControlMBS`) within the handful of results actually returned,
+  so a query naming a class exactly now gets a flat boost toward that class's
+  chunks. Both changes mirror XDOX's `Retrieval.xojo_code` — the scoring recipe
+  is deliberately duplicated on both sides.
+
+## [1.8.0] - 2026-07-09
+
+### Added
+- **Multiple Xojo versions**: XDOX (schema v3) can now index several Xojo doc versions side by side in one `xdox.db`, each chunk tagged with its `docs_version`. `search_docs` filters results to the version XDOX currently has active (`metadata.active_docs_version`, read fresh on every search so a live version switch in XDOX takes effect immediately) plus version-independent curated chunks (`docs_version = ''`). Result headers show the active version. This mirrors XDOX's `Retrieval` — the same filter is deliberately duplicated on both sides.
+
+### Changed
+- **Note relevance labelling**: notes now carry a `scope` (`all` = global/version-independent, or `version`). Only version-scoped notes can show the `[possibly outdated — written for …]` caveat; global notes never do. `search_notes` still searches **all** notes regardless of scope — nothing is filtered out, so Claude never silently misses a note.
+
+### Compatibility
+- Legacy databases (`xojo_rag.db`, or XDOX schema < 3 without the `docs_version`/`scope` columns) are detected at attach and the new filters are skipped — search behaves exactly as before against them.
+
+## [1.7.1] - 2026-07-06
+
+### Added
+- **Hybrid `search_notes`**: notes are now scored semantically (0.7·cosine + 0.3·BM25, relevance floor 0.45 — same recipe as XDOX's chat) whenever the embedding server answers, so natural-language queries find notes that share no keywords with the question. Falls back to the keyword tier unchanged.
+
+### Fixed
+- **Startup-order dependency**: the RAG database and the embedding server were probed exactly once, at process start. XMCP typically starts with the editor — *before* XDOX — and would then sit in the lowest search tier until restarted. Both are now re-checked lazily at search time (server probes are rate-limited to one per 30 s while down), so search upgrades itself the moment XDOX comes up. The XDOX database path is used even when the file doesn't exist yet, covering first launch and post-schema-bump reindexes.
+- `search_docs` drops back to the keyword tier immediately when the embedding server disappears mid-session (previously each search paid a failed HTTP round-trip).
+
+## [1.7.0] - 2026-07-06
+
+### Added
+- **`search_notes`**: searches the user's personal Xojo notes, written and curated in the [XDOX](https://github.com/o3jvind/XDOX) app. Notes flagged `[possibly outdated — written for Xojo <version>]` predate the currently indexed docs version. Responds gracefully against legacy databases without notes tables.
+- **`--db-path` option**: explicit RAG-database override. Default discovery order is now `--db-path` → `~/Library/Application Support/dk.o3jvind.xdox/xdox.db` (built and maintained by the XDOX app, which replaces XMCP-RAG-Indexer) → legacy `xojo_rag.db` next to the documentation.
+- **Keyword (BM25) search tier**: `search_docs` now degrades semantic → keyword → plain text scan. The keyword tier runs FTS5/BM25 against the RAG database and needs no embedding server, replacing the `llms-full.txt` substring scan as the primary fallback.
+- **Metadata validation**: `embedding_dim` ≠ 768 disables the semantic tier (keyword still works); the indexed `docs_version` is included in `search_docs`/`search_notes` result headers.
+
+### Changed
+- `SemanticSearch` keeps the database connection open when the embedding server is down (previously it discarded both), and the startup server probe fails fast (2 s + connection-error handler) instead of hanging up to 10 s.
+
+### Notes
+- The embedding server on port 8089 is managed automatically by the XDOX app while it runs. Semantic search is available whenever XDOX (or a manually started server) is up; keyword search works at all times.
+## [1.6.3] - 2026-06-22
+
+### Fixed
+- **CPU spin at idle**: `StdIn.ReadLine` does not block in Xojo's `ConsoleApplication` — it busy-spins when no data is available, causing ~100% CPU usage at idle. Replaced the `While True` / `ReadLine` loop with a `DoEvents(10)`-based loop that accumulates data from `StdIn.ReadAll` into a buffer and processes complete newline-terminated lines as they arrive. Idle CPU usage drops from ~100% to ~1%.
+
+## [1.6.2] - 2026-06-22
+
+### Changed
+- **`XOJO_IPCPATH` environment variable support**: XMCP now reads the `XOJO_IPCPATH` environment variable when locating the IDE's IPC socket, consistent with the Xojo IDE Scripting API documentation. If the variable contains a full path it is used directly; if it contains only a filename, `/tmp/` is prepended. Falls back to the standard `/tmp/XojoIDE` and `/private/tmp/XojoIDE` locations when the variable is not set.
+
+## [1.6.1] - 2026-06-16
+
+### Changed
+- **Clearer editing guidance in `usage-guide.md`**: "How to edit code" section now explicitly names direct disk editing as the primary path and warns against routing edits through `run_ide_script` + `DoShellCommand` + Python/shell scripts — a fragile workaround that's unnecessary when the MCP client has its own file-editing tools. Also clarifies why `set_code` is not suitable for general editing (no method-level targeting, no `.xojo_window` support).
+
+## [1.6.0] - 2026-06-15
+
+### Added
+- **`save_project`**: saves the current project to disk via `DoCommand("SaveFile")` — no parameters required. Use after `set_code` or other IDE edits to persist changes before building or running.
+- **`analyze_project`**: runs `CheckProjectErrors` (or `CheckItemErrors` with `scope="item"`) without building. Returns a formatted list of errors and warnings using the same structure as `build_project`. Warnings return as success (they don't block builds); errors return as failure.
+- **`debug_control`**: controls an active debug session. Supports `step_over`, `step_into`, `step_out`, `resume`, and `pause` via the `action` parameter.
+
+## [1.5.0] - 2026-06-07
+
+### Added
+- **`MainMenuBar.xojo_menu` example**: reference template for the `.xojo_menu` file format — menu bar with File/Edit/Window/Help menus, separators, keyboard shortcuts, and `DesktopQuitMenuItem`
+- **`DetailWindow.xojo_window` example**: reference template for non-singleton windows (`ImplicitInstance = False`) — demonstrates the `LoadItem()` pre-population pattern, `LayoutControls()`, Default/Cancel button flags, and `Show` vs `ShowModal`
+- **Expanded `MyClass.xojo_code` example**: now includes a custom event definition with `RaiseEvent`, a Shared factory method, a Protected method, and a Note block that documents flag values and block ordering
+- **Expanded `Module1.xojo_code` example**: now includes a private property and a Note block explaining the differences between module and class files
+- **"Xojo file structure rules" section in `usage-guide.md`**: documents the correct block ordering for class, module, and window files; access modifier flag table (`&h0` Public, `&h1` Protected, `&h21` Private); Shared methods; custom event definitions; non-singleton window pattern; Note block format; and MenuHandler syntax
+
+## [1.4.2] - 2026-06-06
+
+### Added
+- **`examples/` exposed as MCP resources**: the five reference templates (`App.xojo_code`, `Module1.xojo_code`, `MyClass.xojo_code`, `MyButton.xojo_code`, `Window1.xojo_window`) are now listed via `resources/list` and readable via `resources/read` using `file://examples/<filename>` URIs — AI clients can fetch them directly without needing filesystem access
+- **Build copy steps**: `usage-guide.md` and the `examples/` folder are now copied next to the binary at build time, so distributed builds are self-contained
+
+## [1.4.1] - 2026-06-05
+
+### Fixed
+- **100% CPU spin on client exit**: `Input` does not raise `IOException` at EOF — it returns an empty string, causing the read loop to busy-spin indefinitely when the spawning client closed stdin. Switched to `StdIn.ReadLine` + `StdIn.EndOfFile` check, which correctly detects EOF and calls `Quit` to terminate the process.
+
+## [1.4.0] - 2026-06-04
+
+### Added
+- **Hybrid search for `search_docs`**: semantic search upgraded from vector-only to hybrid (70% cosine similarity + 30% FTS5 BM25). Catches exact API names that pure vector search may miss while retaining semantic relevance for conceptual queries. Falls back gracefully to vector-only on older databases without FTS5.
+- **Neighbour chunk expansion**: chunks scoring ≥ 0.72 cosine similarity automatically pull in their adjacent chunks (`prev_id`/`next_id`), preserving context at document split boundaries.
+- **Logical result ordering**: results are grouped by source document (highest-scoring source first) and sorted by `chunk_index` within each group, so returned text reads in document order.
+- **In-memory query cache**: repeated identical queries are served from a Dictionary cache (max 50 entries) without hitting the database, reducing latency for follow-up questions.
+- **Persistent database connection**: `SemanticSearch` now holds a single `SQLiteDatabase` open for the lifetime of the process with WAL mode, 256 MB mmap, and 64 MB page cache — eliminates per-query open/close overhead.
+
+## [1.3.1] - 2026-05-06
+
+### Added
+- `examples/` folder next to `usage-guide.md` with reference implementations of common Xojo file structures: `App.xojo_code`, `Module1.xojo_code`, `MyClass.xojo_code`, `MyButton.xojo_code`, `Window1.xojo_window` — gives the AI concrete templates to copy from when creating or editing project files
+
+## [1.3.0] - 2026-05-06
+
+### Changed
+- `usage-guide.md`: direct file editing is now the primary approach for all code changes — not a fallback. `get_code`/`set_code` with dot-separated paths are unreliable and the guide no longer recommends them for writing code
+- `usage-guide.md`: `get_code`/`set_code` without a location parameter work reliably when the user has already selected code in the IDE — after `set_code`, the AI now reminds the user to save (Cmd+S)
+- `usage-guide.md`: `build_project` always reports "Build succeeded" regardless of outcome — AI now always asks the user to confirm the build succeeded
+- `usage-guide.md`: `get_debug_log` is only useful in built apps — the Xojo debugger intercepts all exceptions in debug mode so they never reach the log. The log may contain data from a previous crash; always call `get_debug_log` with `clear: true` after reading
+- `usage-guide.md`: `list_doc_topics` should not be used for lookups — use `search_docs` instead to avoid wasting tokens on the full 143,000-character index
+- `usage-guide.md`: runtime exceptions in debug mode are visible to the user in the IDE debugger but not to XMCP
+- `select_project_item`: error message no longer suggests using `get_code`/`set_code` with dot-path as an alternative
+- CLAUDE.md/README.md: corrected incorrect claim that `.xojo_project` is XML (it is key/value text format)
+
+### Fixed
+
+### Changed
+
+## [1.3.0] - 2026-08-24 (windows-support fork)
 
 ### Added
 - **`describe_item` tool, and file-parsing fallbacks for `get_code` and `list_project_items`.** Four things IDE scripting cannot answer are now answered by parsing the project files: a class's members, a method's signature, whether a name is overloaded, and anything inside a `.xojo_window` — including control event handlers and the control tree. `describe_item` always reads the files; `get_code` and `list_project_items` fall back to them when the IDE returns nothing. Built on XojoKit by Garry Pettet, vendored in `src/XojoKit` — the same parser behind his `xojotool`

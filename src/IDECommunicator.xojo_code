@@ -75,8 +75,12 @@ Protected Class IDECommunicator
 		  /// Uses IPCSocket transport only.
 		  /// Returns the response JSON or Nil on timeout.
 		  ///
-		  /// Retries up to 3 times with a short pause if the socket is temporarily
-		  /// unavailable (e.g. after the Xojo IDE navigates to a new item).
+		  /// Retries up to kMaxRetries times with a short pause if the socket is temporarily
+		  /// unavailable (e.g. after the Xojo IDE navigates to a new item) and the failure
+		  /// happened before the script reached the IDE. Once the script has been delivered a
+		  /// timeout is never retried - the IDE may be executing it, and resending could run it
+		  /// twice - and the socket is parked instead (see AddPending) so the IDE's late reply
+		  /// has somewhere safe to land.
 		  
 		  LastErrorMessage = ""
 		  mParkedThisRequest = False
@@ -187,6 +191,56 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h0
+		Function RunScript(script As String, timeoutMS As Integer = 10000) As MCPKit.ToolResult
+		  /// Sends an IDE script and turns the reply into a ToolResult - the contract most
+		  /// tools share. Came in from upstream 1.9.1; here it sits on the reply classifier, so
+		  /// it reads every error shape the IDE sends (ReplyDiagnostics), reports a warnings-only
+		  /// scriptError as the success it is (ReplyWarnings), and never re-parses a string the
+		  /// script printed as JSON: a constant whose value happens to look like {"buildError":..}
+		  /// is text, not a failure.
+		  ///   - Nil reply            -> Failure with LastErrorMessage (or a timeout message)
+		  ///   - error diagnostics    -> Failure with the formatted diagnostics
+		  ///   - string "ERROR: ..."  -> Failure (the convention XMCP's own scripts use)
+		  ///   - any other string     -> Success(string), warnings appended if any
+		  ///   - empty object {}      -> Success("") - the IDE's answer to a script that printed nothing
+		  ///   - any other object     -> Success(json)
+		  
+		  Var response As JSONItem = SendAndReceive(script, timeoutMS)
+		  If response = Nil Then
+		    If LastErrorMessage <> "" Then Return MCPKit.ToolResult.Failure(LastErrorMessage)
+		    Return MCPKit.ToolResult.Failure("Timeout waiting for IDE response.")
+		  End If
+		  
+		  If Not response.HasKey("response") Then
+		    Return MCPKit.ToolResult.Failure("Unexpected response from IDE: " + response.ToString)
+		  End If
+		  
+		  Var diagnostics As String = ReplyDiagnostics(response)
+		  If diagnostics <> "" Then Return MCPKit.ToolResult.Failure(diagnostics)
+		  
+		  Var warnings As String = ReplyWarnings(response)
+		  Var suffix As String = If(warnings = "", "", EndOfLine + EndOfLine + "The IDE also reported warnings about this script (it still ran):" + EndOfLine + warnings)
+		  
+		  Var resp As String
+		  Var respVar As Variant = response.Value("response")
+		  If respVar.Type = Variant.TypeString Then
+		    resp = respVar.StringValue
+		  Else
+		    Var respJSON As JSONItem = response.Value("response")
+		    If respJSON.Count = 0 Or ReplyKind(response) = "warning" Then
+		      resp = ""
+		    Else
+		      resp = respJSON.ToString
+		    End If
+		  End If
+		  
+		  If resp.BeginsWith("ERROR:") Then Return MCPKit.ToolResult.Failure(resp)
+		  
+		  Return MCPKit.ToolResult.Success(resp + suffix)
+		End Function
+	#tag EndMethod
+
 	#tag Method, Flags = &h21
 		Private Function SendAndReceiveViaIPCSocket(candidatePath As String, payload As String, tag As String, timeoutMS As Integer, script As String) As JSONItem
 		  LastErrorMessage = ""
@@ -206,7 +260,7 @@ Protected Class IDECommunicator
 		  Var deadlineUS As Double = System.Microseconds + (timeoutMS * 1000.0)
 		  Var sock As New IPCSocket
 		  sock.Path = candidatePath
-		  
+
 		  Try
 		    sock.Connect
 		  Catch e As RuntimeException
@@ -226,14 +280,17 @@ Protected Class IDECommunicator
 		    sock.Poll
 		    Thread.SleepCurrent(1)  // 1ms between polls; without this we spin a core until connected.
 		  Wend
-		  
+
 		  If Not sock.IsConnected Then
 		    sock.Close
 		    LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + _
 		    " (connect timed out after " + connectTimeoutMS.ToString + "ms)."
 		    Return Nil
 		  End If
-		  
+
+		  // Once Write succeeds the IDE may already be executing the script even if no reply
+		  // ever arrives; a timeout below therefore parks the socket (AddPending) rather than
+		  // letting the caller retry the same script.
 		  Try
 		    sock.Write(payload)
 		    sock.Flush
@@ -242,7 +299,7 @@ Protected Class IDECommunicator
 		    LastErrorMessage = "IPCSocket write failed for " + candidatePath + ": " + e.Message
 		    Return Nil
 		  End Try
-		  
+
 		  Var buffer As String = ""
 		  Var hadData As Boolean = False
 		  
@@ -259,7 +316,7 @@ Protected Class IDECommunicator
 		  
 		  While System.Microseconds < deadlineUS And System.Microseconds < collectUntilUS
 		    sock.Poll
-		    
+
 		    Var chunk As String = sock.ReadAll
 		    If chunk = "" Then
 		      // Same trap as the stdin loop in ServerApplication: an empty read plus a bare

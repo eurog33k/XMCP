@@ -43,6 +43,10 @@ Inherits ConsoleApplication
 		      
 		      If Verbose Then System.DebugLog(Name + " received: " + inputLine)
 		      
+		      // Reset before parsing so a JSON parse failure reports id: null per the
+		      // JSON-RPC spec instead of reusing the previous request's id.
+		      RequestID = Nil
+		      
 		      // Parse the input (which should be a JSON-RPC request) into a JSONItem.
 		      Var request As New JSONItem(inputLine)
 		      
@@ -136,7 +140,10 @@ Inherits ConsoleApplication
 		  
 		  // Create the result object.
 		  Var result As New JSONItem
-		  result.Value("protocolVersion") = request.Lookup("protocolVersion", PROTOCOL_VERSION)
+		  // Always assert the server's supported protocol version rather than
+		  // echoing the client's request. Echoing risks falsely claiming
+		  // compatibility with a version the server does not implement.
+		  result.Value("protocolVersion") = PROTOCOL_VERSION
 		  
 		  // Add capabilities.
 		  Var capabilities As New JSONItem
@@ -217,10 +224,47 @@ Inherits ConsoleApplication
 		    If Verbose Then System.DebugLog(message)
 		    Return Nil
 		  End If
-		  Var params As JSONItem = request.Value("params")
-		  
-		  // Check this server has a tool with this name and get it if it does.
-		  Var toolName As String = params.Value("name")
+
+		  Var params As JSONItem
+		  Try
+		    params = request.Value("params")
+		  Catch e As RuntimeException
+		    Var message As String = "`params` must be a JSON object."
+		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
+		    If Verbose Then System.DebugLog(message)
+		    Return Nil
+		  End Try
+		  If params = Nil Or params.IsArray Then
+		    Var message As String = "`params` must be a JSON object."
+		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
+		    If Verbose Then System.DebugLog(message)
+		    Return Nil
+		  End If
+
+		  If Not params.HasKey("name") Then
+		    Var message As String = "Missing `name` key in tool call params."
+		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
+		    If Verbose Then System.DebugLog(message)
+		    Return Nil
+		  End If
+
+		  Var toolName As String
+		  Try
+		    Var nameVar As Variant = params.Value("name")
+		    If nameVar.Type <> Variant.TypeString Then
+		      Var message As String = "`name` must be a string."
+		      MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
+		      If Verbose Then System.DebugLog(message)
+		      Return Nil
+		    End If
+		    toolName = nameVar.StringValue
+		  Catch e As RuntimeException
+		    Var message As String = "Invalid `name` value in tool call params."
+		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
+		    If Verbose Then System.DebugLog(message)
+		    Return Nil
+		  End Try
+
 		  If Not HasToolWithName(toolName) Then
 		    Var message As String = "There is no tool named `" + toolName + "`."
 		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.MethodNotFound, message)
@@ -229,19 +273,27 @@ Inherits ConsoleApplication
 		  End If
 		  Var tool As MCPKit.Tool = GetToolNamed(toolName)
 		  
-		  // Get the arguments to the tool.
-		  If Not params.HasKey("arguments") Then
-		    Var message As String = "Missing `arguments` key in tool call params."
-		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
-		    If Verbose Then System.DebugLog(message)
-		    Return Nil
-		  End If
-		  Var argumentsJSON As JSONItem = params.Value("arguments")
-		  If argumentsJSON = Nil Then
-		    Var message As String = "The `arguments` value is not a valid object."
-		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
-		    If Verbose Then System.DebugLog(message)
-		    Return Nil
+		  // Get the arguments to the tool. Per MCP spec, `arguments` may be omitted
+		  // for zero-arg tools — treat a missing key as an empty object. When
+		  // present it must be a JSON object (not null, array, or scalar).
+		  Var argumentsJSON As JSONItem
+		  If params.HasKey("arguments") Then
+		    Try
+		      argumentsJSON = params.Value("arguments")
+		    Catch e As RuntimeException
+		      Var message As String = "The `arguments` value must be a JSON object."
+		      MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
+		      If Verbose Then System.DebugLog(message)
+		      Return Nil
+		    End Try
+		    If argumentsJSON = Nil Or argumentsJSON.IsArray Then
+		      Var message As String = "The `arguments` value must be a JSON object."
+		      MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, message)
+		      If Verbose Then System.DebugLog(message)
+		      Return Nil
+		    End If
+		  Else
+		    argumentsJSON = New JSONItem("{}")
 		  End If
 		  
 		  // Convert the arguments from a JSONItem to an array of ToolArgument instances.
@@ -385,7 +437,24 @@ Inherits ConsoleApplication
 		    resource.Value("mimeType") = "text/markdown"
 		    resourcesArray.Add(resource)
 		  End If
-		  
+
+		  // Find example files in the examples/ folder next to the executable.
+		  Var examplesDir As FolderItem = App.ExecutableFile.Parent.Child("examples")
+		  If examplesDir <> Nil And examplesDir.Exists Then
+		    Var count As Integer = examplesDir.Count
+		    For i As Integer = 1 To count
+		      Var f As FolderItem = examplesDir.ChildAt(i - 1)
+		      If f <> Nil And Not f.IsFolder Then
+		        Var exResource As New JSONItem
+		        exResource.Value("uri") = "file://examples/" + f.Name
+		        exResource.Value("name") = "Example: " + f.Name
+		        exResource.Value("description") = "Reference template for " + f.Name + ". Copy as a starting point when creating or editing this file type."
+		        exResource.Value("mimeType") = "text/plain"
+		        resourcesArray.Add(exResource)
+		      End If
+		    Next
+		  End If
+
 		  result.Value("resources") = resourcesArray
 		  response.Value("result") = result
 		  Return response
@@ -405,24 +474,37 @@ Inherits ConsoleApplication
 		  Var params As JSONItem = request.Value("params")
 		  Var uri As String = params.Lookup("uri", "")
 		  
-		  If uri <> "file://usage-guide.md" Then
+		  Var targetFile As FolderItem
+		  If uri = "file://usage-guide.md" Then
+		    targetFile = App.ExecutableFile.Parent.Child("usage-guide.md")
+		    If targetFile = Nil Or Not targetFile.Exists Then
+		      MCPKit.Error(RequestID, MCPKit.ErrorTypes.ServerError, "usage-guide.md not found next to XMCP executable.")
+		      Return Nil
+		    End If
+		  ElseIf uri.BeginsWith("file://examples/") Then
+		    Const kExamplesPrefix As String = "file://examples/"
+		    Var fileName As String = uri.Middle(kExamplesPrefix.Length) // strip "file://examples/"
+		    If fileName.Contains("/") Or fileName.Contains("..") Then
+		      MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, "Invalid resource URI: " + uri)
+		      Return Nil
+		    End If
+		    targetFile = App.ExecutableFile.Parent.Child("examples").Child(fileName)
+		    If targetFile = Nil Or Not targetFile.Exists Then
+		      MCPKit.Error(RequestID, MCPKit.ErrorTypes.ServerError, "Example file not found: " + fileName)
+		      Return Nil
+		    End If
+		  Else
 		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.InvalidParameters, "Unknown resource URI: " + uri)
 		    Return Nil
 		  End If
-		  
-		  Var guideFile As FolderItem = App.ExecutableFile.Parent.Child("usage-guide.md")
-		  If guideFile = Nil Or Not guideFile.Exists Then
-		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.ServerError, "usage-guide.md not found next to XMCP executable.")
-		    Return Nil
-		  End If
-		  
+
 		  Var content As String = ""
 		  Try
-		    Var stream As TextInputStream = TextInputStream.Open(guideFile)
+		    Var stream As TextInputStream = TextInputStream.Open(targetFile)
 		    content = stream.ReadAll
 		    stream.Close
 		  Catch e As RuntimeException
-		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.ServerError, "Could not read usage-guide.md: " + e.Message)
+		    MCPKit.Error(RequestID, MCPKit.ErrorTypes.ServerError, "Could not read resource: " + e.Message)
 		    Return Nil
 		  End Try
 		  
@@ -432,9 +514,10 @@ Inherits ConsoleApplication
 		  
 		  Var result As New JSONItem
 		  Var contentsArray As New JSONItem("[]")
+		  Var mimeType As String = If(uri = "file://usage-guide.md", "text/markdown", "text/plain")
 		  Var blob As New JSONItem
-		  blob.Value("uri") = "file://usage-guide.md"
-		  blob.Value("mimeType") = "text/markdown"
+		  blob.Value("uri") = uri
+		  blob.Value("mimeType") = mimeType
 		  blob.Value("text") = content
 		  contentsArray.Add(blob)
 		  result.Value("contents") = contentsArray

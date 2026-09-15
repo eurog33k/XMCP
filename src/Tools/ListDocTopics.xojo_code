@@ -37,7 +37,14 @@ Inherits MCPKit.Tool
 		    Var content As String = tis.ReadAll
 		    tis.Close
 
+		    Const kMaxOutputChars = 102400 // ~100 K characters; counted by character so UTF-8 is never split mid-codepoint
+
 		    If filter = "" Then
+		      If content.Length > kMaxOutputChars Then
+		        Var truncated As String = content.Left(kMaxOutputChars)
+		        Var footer As String = EndOfLine + "[truncated to first " + kMaxOutputChars.ToString + " of " + content.Length.ToString + " characters — pass a 'filter' keyword to narrow results]"
+		        Return MCPKit.ToolResult.Success(truncated + footer)
+		      End If
 		      Return MCPKit.ToolResult.Success(content)
 		    End If
 

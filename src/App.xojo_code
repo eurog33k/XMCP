@@ -36,6 +36,88 @@ Inherits MCPKit.ServerApplication
 		    If Verbose Then System.DebugLog("WARNING: Xojo documentation not found. Doc tools will be unavailable.")
 		  End If
 		  
+		  // Locate the RAG database (Task 13). Search order:
+		  //   1. --db-path (explicit override)
+		  //   2. XDOX's canonical DB — XDOX is the user-friendly indexer app that
+		  //      replaced XMCP-RAG-Indexer; hardcoding its bundle id here is
+		  //      deliberate (XMCP is a separate process and cannot ask XDOX)
+		  //   3. Legacy xojo_rag.db next to the docs (XMCP-RAG-Indexer output)
+		  Var ragDB As FolderItem
+		  Var dbPathStr As String = CommandLineParser.StringValue("db-path")
+		  If dbPathStr <> "" Then
+		    ragDB = New FolderItem(dbPathStr, FolderItem.PathModes.Native)
+		    If ragDB = Nil Or Not ragDB.Exists Then
+		      System.DebugLog("WARNING: Specified db path does not exist: " + dbPathStr)
+		      ragDB = Nil
+		    End If
+		  End If
+		  Var xdoxDB As FolderItem = SpecialFolder.ApplicationData.Child("dk.o3jvind.xdox").Child("xdox.db")
+		  If ragDB = Nil And xdoxDB <> Nil And xdoxDB.Exists Then ragDB = xdoxDB
+		  If ragDB = Nil And DocsPath <> Nil Then
+		    Var legacyDB As FolderItem = DocsPath.Child("xojo_rag.db")
+		    If legacyDB <> Nil And legacyDB.Exists Then ragDB = legacyDB
+		  End If
+		  If ragDB = Nil Then
+		    // XDOX's canonical path — used even when the file doesn't exist yet:
+		    // SemanticSearch re-probes lazily, so a DB created after we start
+		    // (first XDOX launch, reindex after schema bump) is picked up without
+		    // restarting the MCP server.
+		    ragDB = xdoxDB
+		  End If
+		  
+		  // The DB alone enables keyword (BM25) search; a running embedding server
+		  // (XDOX manages one on port 8089) upgrades it to hybrid semantic search.
+		  // A running reranker (XDOX manages one on port 8093) further improves
+		  // result ordering on top of that — independently degradable, same as
+		  // the embedding tier. All three are re-checked at search time —
+		  // startup order no longer matters.
+		  // Search is optional: a construction failure (e.g. an unreadable or
+		  // corrupt DB file) must never prevent the stdio MCP server from
+		  // completing its handshake and exposing IDE tools.
+		  Try
+		    SemanticSearch = New SemanticSearch("http://localhost:8089/v1/embeddings", "http://localhost:8093/v1/rerank", ragDB.NativePath)
+		    If Verbose Then
+		      If SemanticSearch.HasDatabase Then
+		        System.DebugLog("RAG database: " + ragDB.NativePath)
+		        If SemanticSearch.Available Then
+		          System.DebugLog("Semantic search enabled (hybrid)" + If(SemanticSearch.RerankAvailable, " with reranking.", " — reranker not reachable, cosine+BM25 ordering only."))
+		        Else
+		          System.DebugLog("Embedding server not reachable — keyword (BM25) search only.")
+		        End If
+		      Else
+		        System.DebugLog("No RAG database yet at " + ragDB.NativePath + " — will re-check at search time; falling back to plain text scan meanwhile.")
+		      End If
+		    End If
+		  Catch e As RuntimeException
+		    SemanticSearch = Nil
+		    System.DebugLog("WARNING: RAG search disabled during startup: " + e.Message)
+		  End Try
+
+		  // Register any Dash/Zeal .docset bundles supplied via --docset-path.
+		  // Each bundle becomes an independent Docset instance; invalid or
+		  // unreadable bundles are skipped with a warning rather than failing
+		  // startup, matching how DocsPath/RAG DB failures are handled above.
+		  Var docsetPathValues() As Variant = CommandLineParser.ArrayValue("docset-path")
+		  For Each pathValue As Variant In docsetPathValues
+		    Var pathStr As String = pathValue.StringValue
+		    If pathStr = "" Then Continue
+
+		    Var bundlePath As New FolderItem(pathStr, FolderItem.PathModes.Native)
+		    If bundlePath = Nil Or Not bundlePath.Exists Then
+		      System.DebugLog("WARNING: Specified docset path does not exist: " + pathStr)
+		      Continue
+		    End If
+
+		    Var dsidx As FolderItem = bundlePath.Child("Contents").Child("Resources").Child("docSet.dsidx")
+		    If dsidx = Nil Or Not dsidx.Exists Then
+		      System.DebugLog("WARNING: Not a valid .docset bundle (missing Contents/Resources/docSet.dsidx): " + bundlePath.NativePath)
+		      Continue
+		    End If
+
+		    Docsets.Add(New Docset(bundlePath))
+		    If Verbose Then System.DebugLog("Docset registered: " + bundlePath.NativePath)
+		  Next pathValue
+
 		  // Register all MCP tools.
 		  RegisterTools( _
 		  New ListProjectItems, _
@@ -58,11 +140,19 @@ Inherits MCPKit.ServerApplication
 		  New GetItemDescription, _
 		  New ConstantValue, _
 		  New SearchDocs, _
+		  New SearchNotes, _
 		  New LookupClass, _
 		  New ListDocTopics, _
 		  New RevertProject, _
 		  New EstimateRequestCost, _
-		  New GetDebugLog _
+		  New GetDebugLog, _
+		  New AnalyzeProject, _
+		  New DebugControl, _
+		  New ScaffoldCodeBlock, _
+		  New LintProjectFile, _
+		  New ListDocsets, _
+		  New SearchDocset, _
+		  New GetDocsetEntry _
 		  )
 		  
 		  // get_system_log reads output that only macOS keeps; see
@@ -106,11 +196,20 @@ Inherits MCPKit.ServerApplication
 		    Print("  revert_project       Reload project from disk after file changes")
 		    Print("  get_item_description Get or set the description of a project item")
 		    Print("  constant_value       Get or set the value of a project constant")
+		    Print("  save_project         Save the project to disk")
+		    Print("  analyze_project      Analyze project for errors and warnings")
+		    Print("  debug_control        Step, resume, or pause an active debug session")
+		    Print("  scaffold_code_block  Generate a correctly formatted #tag block to insert")
+		    Print("  lint_project_file    Validate a .xojo_code/.xojo_window file for known errors")
 		    Print("")
 		    Print("  Documentation Tools:")
-		    Print("  search_docs          Search Xojo documentation by keyword")
+		    Print("  search_docs          Search Xojo documentation (semantic/keyword)")
+		    Print("  search_notes         Search the user's personal XDOX notes")
 		    Print("  lookup_class         Look up detailed docs for a specific class")
 		    Print("  list_doc_topics      List available documentation topics")
+		    Print("  list_docsets         List registered Dash/Zeal .docset bundles")
+		    Print("  search_docset        Search a registered .docset bundle by name")
+		    Print("  get_docset_entry     Read a specific entry from a .docset bundle")
 		    Print("")
 		    Print("  Cost Awareness:")
 		    Print("  estimate_request_cost Estimate likely token cost and alternatives")
@@ -128,6 +227,9 @@ Inherits MCPKit.ServerApplication
 		    Print("  Documentation is auto-detected from " + Platform.DocsRootPath)
 		    Print("  or can be specified with --docs-path.")
 		    Print("")
+		    Print("  Third-party Dash/Zeal .docset bundles can be registered with")
+		    Print("  --docset-path (repeat the flag once per bundle).")
+		    Print("")
 		    Print("  Make sure the Xojo IDE is running before starting this server.")
 		    Print("")
 		    Print("Example MCP client configuration (Claude Code):")
@@ -137,7 +239,8 @@ Inherits MCPKit.ServerApplication
 		    // The real path, with backslashes doubled so the line is valid JSON on Windows.
 		    Var ownPath As String = "/path/to/XMCP"
 		    If App.ExecutableFile <> Nil Then ownPath = App.ExecutableFile.NativePath
-		    Print("        ""command"": """ + ownPath.ReplaceAll("\", "\\") + """")
+		    Print("        ""command"": """ + ownPath.ReplaceAll("\", "\\") + """,")
+		    Print("        ""args"": [""--docset-path"", ""/path/to/Foo.docset""]")
 		    Print("      }")
 		    Print("    }")
 		    Print("  }")
@@ -151,7 +254,15 @@ Inherits MCPKit.ServerApplication
 		Sub WillParseOptions()
 		  CommandLineParser.AppDescription = "MCP server for controlling the Xojo IDE"
 		  CommandLineParser.AddOption("d", "docs-path", "Path to Xojo documentation directory (auto-detected if omitted)", MCPKit.OptionTypes.String)
-		  
+		  CommandLineParser.AddOption("b", "db-path", "Path to the RAG database (default: XDOX's xdox.db, then legacy xojo_rag.db)", MCPKit.OptionTypes.String)
+		  // String, not Directory: MCPKit.Option.IsValid's getter does a hard
+		  // `FolderItem = Value` cast for Directory/File types, which assumes a
+		  // single value — combined with IsArray (Value is an Array(Variant)
+		  // once set), that cast raises "Array cannot be cast to FolderItem"
+		  // during parsing. Read as strings and build FolderItems ourselves below.
+		  CommandLineParser.AddOption("", "docset-path", "Path to a Dash/Zeal-style .docset bundle (repeatable)", MCPKit.OptionTypes.String)
+		  CommandLineParser.OptionValue("docset-path").IsArray = True
+
 		End Sub
 	#tag EndEvent
 
@@ -246,15 +357,22 @@ Inherits MCPKit.ServerApplication
 	#tag EndMethod
 
 
-	#tag Constant, Name = kToolCount, Type = Double, Dynamic = False, Default = \"26", Scope = Private
+	#tag Constant, Name = kToolCount, Type = Double, Dynamic = False, Default = \"34", Scope = Private
 	#tag EndConstant
-
 	#tag Property, Flags = &h0, Description = 5061746820746F20586F6A6F20646F63756D656E746174696F6E206469726563746F72792E
 		DocsPath As FolderItem
 	#tag EndProperty
 
 	#tag Property, Flags = &h0, Description = 546865207368617265642049444520636F6D6D756E696361746F7220696E7374616E63652E
 		IDE As IDECommunicator
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		SemanticSearch As SemanticSearch
+	#tag EndProperty
+
+	#tag Property, Flags = &h0, Description = 5265676973746572656420446173682f5a65616c202e646f637365742062756e646c6573202d2d206f6e6520656e74727920706572202d2d646f637365742d7061746820666c61672e
+		Docsets() As Docset
 	#tag EndProperty
 
 

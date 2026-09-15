@@ -39,6 +39,23 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("The query parameter is required.")
 		  End If
 
+		  // Tiered search (Task 13):
+		  //   1. semantic (hybrid) — needs the RAG DB + the embedding server
+		  //   2. keyword (BM25)    — needs only the RAG DB
+		  //   3. plain text scan of llms-full.txt — needs neither (last resort)
+		  If App.SemanticSearch <> Nil Then
+		    If App.SemanticSearch.Available Then
+		      Var semanticResult As String = App.SemanticSearch.Search(query, maxResults)
+		      If semanticResult <> "" Then
+		        Return MCPKit.ToolResult.Success(semanticResult)
+		      End If
+		    End If
+		    Var keywordResult As String = App.SemanticSearch.KeywordSearch(query, maxResults)
+		    If keywordResult <> "" Then
+		      Return MCPKit.ToolResult.Success(keywordResult)
+		    End If
+		  End If
+
 		  If App.DocsPath = Nil Then
 		    Return MCPKit.ToolResult.Failure("Xojo documentation not found. Use --docs-path to specify the documentation directory, or ensure the Xojo IDE has been run at least once.")
 		  End If
