@@ -11,6 +11,7 @@ XMCP gives you direct control over the Xojo IDE via 26 tools (25 on Windows — 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
 - **Build and run**: `build_project`, `run_project`, `stop_project` — `stop_project` asks the IDE to stop the app, then looks for a live debug build under the project folder and terminates it directly if the IDE's Kill did not, because Kill does not stop a console debug build. It says which of the two happened, and distinguishes both from having found nothing running
+- **A build blocks the IDE.** While it compiles, the IDE answers *no* tool at all; `build_project` and `run_project` wait 30 minutes by default (`timeout`, in ms). If a build outlasts that, it still completes in the IDE, and every tool refuses with a *still executing an earlier request* message until the IDE has answered. That refusal is deliberate: the connection is kept open so the IDE can reply safely, because closing it makes the IDE crash with SIGPIPE when it finally writes. Do not call other tools in a loop to "check" on a build, and do not restart the MCP client while one is running. Wait, then check the Builds folder or build again
 - **Save**: `save_project` — writes the IDE's in-memory project to disk. Call this after `set_code`, `create_project_item`, `constant_value` or `get_item_description` so your changes reach disk
 - **Create items**: `create_project_item`
 - **Inspect and modify**: `get_item_description`, `constant_value`, `get_project_info`, `revert_project`
@@ -122,7 +123,7 @@ XMCP runs on macOS and Windows. What changes:
 
 | | macOS | Windows |
 |---|---|---|
-| IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (no file exists at that path — the endpoint is a named pipe) |
+| IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (no file exists at that path — on Windows an `IPCSocket` is a TCP socket on localhost whose port is hashed from that path string) |
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | `get_system_log` | available | **not registered** — no unified-log equivalent |
 | `revert_project` | works | works — opens an empty project first if yours is the only window |

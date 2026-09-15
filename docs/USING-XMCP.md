@@ -219,7 +219,7 @@ Linux, so write to a log file there instead.
 | | macOS | Windows |
 |---|---|---|
 | Tools available | 26 | 25 |
-| IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (a named pipe — no file exists at that path) |
+| IDE socket | `/tmp/XojoIDE` | `%LOCALAPPDATA%\Temp\XojoIDE` (no file exists at that path — a TCP socket on localhost whose port is hashed from the path string) |
 | Debug log | `/tmp/xmcp_debug.log` | `%TEMP%\xmcp_debug.log` |
 | Documentation | `~/Library/Application Support/Xojo/Xojo/` | `%APPDATA%\Xojo\Xojo\` |
 | `get_system_log` | available | **not available** — `System.DebugLog` goes to `OutputDebugString`, which only an attached debugger sees |
@@ -228,8 +228,9 @@ Linux, so write to a log file there instead.
 
 Everything else behaves identically. Two Windows-specific rules:
 
-- **Run the assistant natively**, not under WSL. The IDE's endpoint is a Windows named pipe, which
-  a Linux process cannot open — there is nothing to reach through `/mnt/c`.
+- **Run the assistant natively**, not under WSL. On Windows the IDE listens on a TCP port on the
+  Windows host's `localhost`, and a Linux XMCP would look for a Unix socket file instead — there is
+  nothing to reach through `/mnt/c`, and WSL's `localhost` is not the host's.
 - **Never set `XOJO_AUTOMATION=TRUE`.** Xojo documents it for build automation, but on Windows the
   IDE exits right after loading a project, and every tool then reports `No IDE listener`.
 

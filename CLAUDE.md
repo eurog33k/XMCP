@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-XMCP is an MCP (Model Context Protocol) server written in **Xojo** that gives AI assistants direct control over the Xojo IDE. It communicates via stdin/stdout JSON-RPC (MCP protocol) and forwards IDE commands over an `IPCSocket` to the running Xojo IDE process (a Unix domain socket on macOS and Linux, a named-pipe endpoint on Windows).
+XMCP is an MCP (Model Context Protocol) server written in **Xojo** that gives AI assistants direct control over the Xojo IDE. It communicates via stdin/stdout JSON-RPC (MCP protocol) and forwards IDE commands over an `IPCSocket` to the running Xojo IDE process (a Unix domain socket on macOS and Linux; on Windows a TCP socket on `localhost` whose port is hashed from the path string - not a named pipe, see README "The transport underneath").
 
 ## Building
 

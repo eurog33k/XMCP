@@ -45,24 +45,32 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("Timeout waiting for IDE response (" + timeoutMS.ToString + "ms).")
 		  End If
 
-		  // Check for script errors.
+		  // Errors first. ReplyDiagnostics reads every error shape the IDE sends and already
+		  // separates scriptCompilerWarning entries (the script ran) from real errors, and
+		  // corrects the line numbers, which the IDE reports one too high because it wraps the
+		  // script in a line of boilerplate before compiling it.
+		  Var diagnostics As String = App.IDE.ReplyDiagnostics(response)
+		  If diagnostics <> "" Then
+		    Return MCPKit.ToolResult.Failure(diagnostics)
+		  End If
+
+		  // A compiler warning about the script arrives as a separate reply part; report it
+		  // with the output rather than instead of it.
+		  Var warnings As String = App.IDE.ReplyWarnings(response)
+		  Var suffix As String = If(warnings = "", "", EndOfLine + EndOfLine + "The IDE also reported warnings about this script (it still ran):" + EndOfLine + warnings)
+
 		  If response.HasKey("response") Then
 		    Var resp As Variant = response.Value("response")
 		    If resp.Type = Variant.TypeString Then
 		      If resp.StringValue = "" Then Return NoOutputResult
-		      Return MCPKit.ToolResult.Success(resp.StringValue)
+		      Return MCPKit.ToolResult.Success(resp.StringValue + suffix)
 		    Else
-		      // Could be a scriptError object.
 		      Var respJSON As JSONItem = response.Value("response")
-		      If respJSON.HasKey("scriptError") Then
-		        Return MCPKit.ToolResult.Failure("Script error: " + respJSON.ToString)
-		      End If
-
 		      // An empty object is what the IDE answers when the script printed nothing. It is
-		      // not necessarily a failure, but returning a bare "{}" reads like output.
-		      If respJSON.Count = 0 Then Return NoOutputResult
-
-		      Return MCPKit.ToolResult.Success(respJSON.ToString)
+		      // not necessarily a failure, but returning a bare "{}" reads like output. So is a
+		      // warnings-only object: the script ran, it just printed nothing.
+		      If respJSON.Count = 0 Or App.IDE.ReplyKind(response) = "warning" Then Return NoOutputResult
+		      Return MCPKit.ToolResult.Success(respJSON.ToString + suffix)
 		    End If
 		  End If
 

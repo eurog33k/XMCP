@@ -157,18 +157,25 @@ Replaces the currently selected text in the code editor with new text.
 
 #### `build_project`
 
-Builds the current Xojo project. Returns the path to the built application on success, or build errors on failure. Uses a 120-second timeout for long builds.
+Builds the current Xojo project. Returns the path to the built application on success, or build errors on failure.
+
+A build blocks the IDE's main thread, so the IDE answers **no** tool until it is done, and a large project takes minutes. The default wait is 30 minutes, sized from measured builds rather than from demos: warm builds of small projects take seconds, the same build after a cold IDE start has taken two minutes, and a real project takes longer still. If the build outlasts it, the build still completes: XMCP keeps the connection open so the IDE can deliver its late reply safely (closing it would kill the IDE - see [Long-running requests](#long-running-requests)), and every tool refuses with a *still executing an earlier request* message until the IDE has answered. Wait, then check the Builds folder or build again.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `build_type` | Integer | No | `0` Default, `5` macOS (Cocoa), `9` Windows 32-bit, `14` Windows 64-bit, `16` Linux 32-bit, `17` Linux 64-bit, `18` Linux ARM, `24` macOS Universal. Default: 0. |
-| `reveal` | Boolean | No | Reveal the built app in Finder after building. Default: false. |
+| `build_type` | Integer | No | `3` Windows 32-bit, `19` Windows 64-bit Intel, `25` Windows 64-bit ARM, `9` macOS Universal, `16` macOS 64-bit Intel, `24` macOS 64-bit ARM, `17` Linux 64-bit Intel, `18` Linux 32-bit ARM, `26` Linux 64-bit ARM, `4` Linux 32-bit Intel. Omit to build for the platform XMCP runs on. The target must be enabled in Build Settings. |
+| `reveal` | Boolean | No | Reveal the built app in Finder/Explorer after building. Default: false. |
+| `timeout` | Integer | No | How long to wait, in milliseconds. Default: 1800000 (30 minutes). Giving up does not stop the build. |
+
+The result carries the built app's path with the IDE's shell escaping removed, so it can be opened as it is. A `buildError` is reported as its error list, and the undocumented `missingFiles` answer - the IDE's way of saying a target needs configuring first, such as an Android build with no key store - is reported as exactly that instead of as an unrecognised object.
 
 #### `run_project`
 
-Runs the current Xojo project in debug mode.
+Runs the current Xojo project in debug mode. Compiling the debug build blocks the IDE the same way `build_project` does, and the same rules apply if it outlasts the timeout.
 
-*No parameters.*
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `timeout` | Integer | No | How long to wait for the debug build to compile and start, in milliseconds. Default: 1800000 (30 minutes). |
 
 #### `stop_project`
 
@@ -371,12 +378,16 @@ XMCP
 
 ### IDE Communication
 
-XMCP connects to the Xojo IDE via an `IPCSocket` - a Unix domain socket on macOS and Linux, a named-pipe endpoint on Windows. It uses the **IDE Communicator Protocol v2**, where messages are NUL-terminated JSON objects:
+XMCP connects to the Xojo IDE via an `IPCSocket` - a Unix domain socket on macOS and Linux, a TCP socket on `localhost` on Windows (see [The transport underneath](#the-transport-underneath)). It uses the **IDE Communicator Protocol v2**, where messages are NUL-terminated JSON objects:
 
 1. On connect, sends `{"protocol": 2}` to upgrade to protocol v2
 2. Requests are sent as `{"tag": "xmcp_1", "script": "Print Location"}`
 3. Responses arrive as `{"tag": "xmcp_1", "response": "App.Constructor"}`
 4. Tags correlate requests with responses for synchronous operation
+
+One reply can arrive as **several messages under the same tag**: a script's `Print` output and a compiler warning about that script land about a millisecond apart, and an analysis answers with its `buildError` and the `Print` sentinel together. XMCP keeps reading for a short window after the first matching frame (longer when the first part is only a warning, since the real output is then still on its way) and merges the parts: an error part is the answer, otherwise the output is, and a warning is only the answer when it is all there is. The other parts stay attached, which is how a tool can report the warning that accompanied a successful script rather than one or the other.
+
+The reply shapes XMCP recognises: a string (what the script printed), an empty object (the script printed nothing), `scriptError` - a **heterogeneous** array whose entries are `scriptCompilerError`, `scriptRuntimeError` or `scriptCompilerWarning`, so a warnings-only array means the script ran - `buildError` with `errors` and `warnings`, `missingFiles`, `openErrors` and `loadError`. Script error line numbers are reported one lower than the IDE sends them, because the IDE wraps every script in a line of boilerplate before compiling it.
 
 The `IDECommunicator` class handles connection management, tag generation, synchronous send/receive with configurable timeouts, and NUL-terminated message framing using direct `IPCSocket` communication.
 
@@ -393,10 +404,39 @@ The socket file name is `XojoIDE`, or the value of the `XOJO_IPCPATH` environmen
 
 Two platform differences matter:
 
-- **Windows endpoints have no filesystem entry.** `FolderItem.Exists` on the socket path is always `False` there, even while the IDE is listening, so it must never gate the connect. XMCP keeps the existence check as a fast path on macOS and Linux only, and on Windows rules a candidate out with a short (1.5 s) connect timeout instead.
+- **Windows endpoints have no filesystem entry**, because on Windows an `IPCSocket` is not a file at all but a TCP socket on `localhost` whose port is derived from the path string. `FolderItem.Exists` on the socket path is therefore always `False` there, even while the IDE is listening, so it must never gate the connect. XMCP keeps the existence check as a fast path on macOS and Linux only, and on Windows rules a candidate out with a short (1.5 s) connect timeout instead.
 - **The path is per-user.** `%LOCALAPPDATA%` differs between accounts, so XMCP must run as the same Windows user as the IDE. When no listener is found, the error message lists every path that was tried.
 
 If all attempts fail, the tool returns a detailed connection/timeout error.
+
+#### The transport underneath
+
+`IPCSocket` presents one API on every platform - `Path`, `Listen`, `Connect`, `Poll`, `ReadAll`, `IsConnected`, `Close` - but is built on two different things, and several XMCP behaviours follow from which one is in play.
+
+| | macOS / Linux | Windows |
+|---|---|---|
+| Underneath | Unix domain socket | TCP socket bound to `localhost` |
+| `Path` means | a real filesystem entry (`/tmp/XojoIDE`) | a string that is **hashed into the port number** (1025-65535); no file exists |
+| Can be pre-checked with `FolderItem.Exists` | yes | never |
+| While the IDE is busy (a build) | connects complete into the listen backlog; the IDE removes and recreates its socket file around a build | connects complete into the listen backlog |
+| The IDE writes to a peer XMCP has closed | `SIGPIPE`, and the IDE dies (see below) | the write fails with an error; nothing dies |
+
+The Windows facts come from Xojo engineer Joe Ranieri on the Xojo forum: *"On Windows, Xojo IPCSockets are just a TCP socket bound to localhost. The port it listens on is determined by the 'path' of the IPCSocket"* ([IPCSocket path](https://forum.xojo.com/t/ipcsocket-path/13634)). Xojo has said it would like to move Windows to named pipes at some point; until it does, two consequences matter:
+
+- **The path string must match the IDE's exactly** - same drive letter case, same separators, same folder - or XMCP hashes to a different port and finds nothing listening. That is why `Platform.IPCSocketPaths` mirrors the IDE's own `FindIPCPath` step for step rather than approximating it.
+- **The port is shared with the rest of the machine.** Any local process can connect to it, and a hash collision with an unrelated service is possible in principle. A `No IDE listener` on Windows with the IDE visibly running is worth checking against `netstat` before assuming a path problem.
+
+Other facts from the [`IPCSocket` reference](https://documentation.xojo.com/api/networking/ipcsocket.html) that XMCP relies on: `Path` is limited to 103 characters; one side must `Listen` before the other can `Connect`; `Close` on one end raises the other end's `Error` event with error 102, which is how `DrainPending` sees the IDE go away; a socket file may linger after the connection closes; and latency is lowest when polling explicitly, which is why `IDECommunicator` drives the socket with `Poll` rather than events. Xojo's own reference client, `Example Projects/.../IDE Scripting/IDECommunicator/v2`, connects, writes the script, polls once and never reads a reply - the tagged request/response framing is the IDE's side of protocol 2, which XMCP implements in full.
+
+An independent implementation worth knowing about is Lodgit's [xojo-ide-communicator](https://github.com/Lodgit/xojo-ide-communicator), a Go CLI for CI use (open, run, build, and drive XojoUnit tests) that speaks the same protocol without any Xojo code. It agrees with XMCP on every point of the wire format - one `{"protocol":2}` NUL-terminated frame after connect, then `{"tag","script"}` requests and `{"tag","response"}` replies, `Print` for values, `Print BuildApp(type, reveal)` for builds - and it treats the same four keys as errors: `buildError`, `loadError`, `openErrors`, `scriptError`, all of which XMCP handles in the tools where they can occur. Two of its choices differ from XMCP's and are instructive. It opens **one connection for the whole session** and sends every request down it, where XMCP connects per request; the IDE supports both, and the per-request model is what produced the queue of abandoned connections described below before parking was added. And it **waits for a reply with no timeout at all** - its socket library blocks in `Read` with no deadline - which is the other way of never closing a socket the IDE will still write to. It is Unix-only (`/private/tmp/XojoIDE` on macOS, `/tmp/XojoIDE` on Linux), so it never met the Windows port hashing.
+
+#### Long-running requests
+
+The IDE executes scripts one at a time on its main thread. A build, or a modal dialog waiting for a click, holds it for minutes, during which it accepts new connections into the listen backlog but answers nothing - and when it is free again it answers everything that queued up, on the connections the requests arrived on.
+
+That is why a request XMCP has given up on must **not** be closed. A write into a closed peer raises `SIGPIPE`, and the Xojo IDE does not ignore that signal: it dies on the spot, mid-build, with no crash report - the system log shows only `exited due to SIGPIPE`. XMCP used to close timed-out sockets, and a 2.5-minute build under the old 120 s limit killed the IDE exactly this way.
+
+So a socket whose request was delivered but not answered in time is *parked* open (`IDECommunicator.AddPending`). While any parked request is outstanding, every new request is refused immediately with the tag, age and script of what the IDE is still working on, rather than being queued behind it and abandoned in turn. `DrainPending`, run before each request, releases a parked socket once the IDE has replied (the reply is discarded), once the IDE has closed the connection (it quit or crashed), or after two hours. The remaining gap is XMCP's own exit: if the MCP client stops the server while a build is running, the sockets close with the process and the IDE is exposed again, so do not restart the client during a long build.
 
 ### Reading the project files
 

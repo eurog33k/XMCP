@@ -3,14 +3,26 @@ Protected Class RunProject
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("run_project", "Runs the current Xojo project in debug mode.")
+		  Super.Constructor("run_project", "Runs the current Xojo project in debug mode. " + _
+		  "Compiling the debug build blocks the IDE, which answers no other tool until it is done. " + _
+		  "If that outlasts the timeout the compile still completes; the connection is kept open so the IDE can finish safely, " + _
+		  "and other tools refuse with a 'still executing an earlier request' message until it has.")
+
+		  Parameters.Add(New MCPKit.ToolParameter("timeout", MCPKit.ToolParameterTypes.Integer_, _
+		  "How long to wait for the debug build to compile and start, in milliseconds. Default is 1800000 (30 minutes).", _
+		  True, CType(kDefaultTimeoutMS, Integer), False))
 
 		End Sub
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
 		Function Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult
-		  #Pragma Unused args
+		  Var timeoutMS As Integer = CType(kDefaultTimeoutMS, Integer)
+		  For Each arg As MCPKit.ToolArgument In args
+		    If arg.Name = "timeout" And arg.Value.IntegerValue > 0 Then
+		      timeoutMS = arg.Value.IntegerValue
+		    End If
+		  Next arg
 
 		  // DoCommand "RunApp" returns a buildError JSON object on failure,
 		  // or {} on success. The IDE returns it directly as the response value —
@@ -22,12 +34,17 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
 		  End If
 
-		  Var response As JSONItem = App.IDE.SendAndReceive(script, 30000)
+		  // RunApp compiles first, and a compile blocks the IDE for as long as it takes.
+		  // IDECommunicator keeps the socket open if we stop waiting, so a late reply
+		  // cannot kill the IDE (see AddPending there).
+		  Var response As JSONItem = App.IDE.SendAndReceive(script, timeoutMS)
 		  If response = Nil Then
 		    If App.IDE.LastErrorMessage <> "" Then
 		      Return MCPKit.ToolResult.Failure(App.IDE.LastErrorMessage)
 		    End If
-		    Return MCPKit.ToolResult.Failure("Timeout waiting for IDE response.")
+		    Var timeoutS As Integer = timeoutMS / 1000
+		    Return MCPKit.ToolResult.Failure("No answer from the IDE within " + timeoutS.ToString + " s. " + _
+		    "The debug build is still compiling in the IDE; wait for it before calling any other tool.")
 		  End If
 
 		  If response.HasKey("response") Then
@@ -65,33 +82,32 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Success("Project launched in debug mode.")
 		  End If
 
-		  If resultJSON.HasKey("buildError") Then
-		    Var buildError As JSONItem = resultJSON.Value("buildError")
-		    If buildError.HasKey("errors") Then
-		      Var errors As JSONItem = buildError.Value("errors")
-		      Var lines() As String
-		      Var i As Integer
-		      For i = 0 To errors.Count - 1
-		        Var err As JSONItem = errors.Value(i)
-		        Var errType As String = If(err.HasKey("type"), err.Value("type").StringValue, "Error")
-		        Var msg As String = If(err.HasKey("message"), err.Value("message").StringValue, "")
-		        Var location As String = If(err.HasKey("location"), err.Value("location").StringValue, "")
-		        Var position As String = If(err.HasKey("position"), err.Value("position").StringValue, "")
-		        Var line As String = errType + ": " + msg
-		        If location <> "" Then line = line + " [" + location + "]"
-		        If position <> "" And position <> location Then line = line + " (" + position + ")"
-		        lines.Add(line)
-		      Next i
-		      Return MCPKit.ToolResult.Failure("Build errors (" + errors.Count.ToString + "):" + EndOfLine + String.FromArray(lines, EndOfLine))
-		    End If
-		    Return MCPKit.ToolResult.Failure("Build failed: " + buildError.ToString)
+		  // buildError, missingFiles, openErrors, loadError - formatted by the shared
+		  // classifier in IDECommunicator so every tool reports them the same way.
+		  Var envelope As New JSONItem
+		  envelope.Value("response") = resultJSON
+		  Var diagnostics As String = App.IDE.ReplyDiagnostics(envelope)
+		  If diagnostics <> "" Then
+		    Var warnings As String = App.IDE.ReplyWarnings(envelope)
+		    If warnings <> "" Then diagnostics = diagnostics + EndOfLine + "Warnings:" + EndOfLine + warnings
+		    Return MCPKit.ToolResult.Failure(diagnostics)
 		  End If
 
-		  // Unknown JSON structure — return raw for debugging.
+		  // Warnings only: the debug build compiled and is running.
+		  Var warningsOnly As String = App.IDE.ReplyWarnings(envelope)
+		  If warningsOnly <> "" Then
+		    Return MCPKit.ToolResult.Success("Project launched in debug mode." + EndOfLine + "Warnings:" + EndOfLine + warningsOnly)
+		  End If
+
+		  // Unknown JSON structure: return raw for debugging.
 		  Return MCPKit.ToolResult.Failure("Run failed: " + resultJSON.ToString)
 
 		End Function
 	#tag EndMethod
+
+
+	#tag Constant, Name = kDefaultTimeoutMS, Type = Double, Dynamic = False, Default = \"1800000", Scope = Private
+	#tag EndConstant
 
 
 	#tag ViewBehavior

@@ -3,7 +3,10 @@ Protected Class BuildProject
 Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Sub Constructor()
-		  Super.Constructor("build_project", "Builds the current Xojo project. Returns the path to the built application on success, or build errors on failure.")
+		  Super.Constructor("build_project", "Builds the current Xojo project. Returns the path to the built application on success, or build errors on failure. " + _
+		  "The IDE is blocked for the whole build and answers no other tool until it is done; a large project can take many minutes. " + _
+		  "If the build outlasts the timeout, it still completes in the IDE - the connection is kept open so the IDE can finish safely - " + _
+		  "and every tool refuses with a 'still executing an earlier request' message until it has. Wait, then check the Builds folder or build again.")
 
 		  // Values per IDE Scripting > Building commands > BuildApp. Getting these wrong
 		  // is silent: an unavailable target simply does not build.
@@ -18,6 +21,11 @@ Inherits MCPKit.Tool
 		  "Whether to reveal the built app in Finder/Explorer after building. Default is false.", _
 		  True, False, False))
 
+		  Parameters.Add(New MCPKit.ToolParameter("timeout", MCPKit.ToolParameterTypes.Integer_, _
+		  "How long to wait for the build, in milliseconds. Default is 1800000 (30 minutes). " + _
+		  "Set it generously: giving up does not stop the build, it only means the result is not reported.", _
+		  True, CType(kDefaultTimeoutMS, Integer), False))
+
 		End Sub
 	#tag EndMethod
 
@@ -25,11 +33,14 @@ Inherits MCPKit.Tool
 		Function Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult
 		  Var buildType As Integer = 0
 		  Var reveal As Boolean = False
+		  Var timeoutMS As Integer = CType(kDefaultTimeoutMS, Integer)
 		  For Each arg As MCPKit.ToolArgument In args
 		    If arg.Name = "build_type" Then
 		      buildType = arg.Value.IntegerValue
 		    ElseIf arg.Name = "reveal" Then
 		      reveal = arg.Value.BooleanValue
+		    ElseIf arg.Name = "timeout" Then
+		      If arg.Value.IntegerValue > 0 Then timeoutMS = arg.Value.IntegerValue
 		    End If
 		  Next arg
 
@@ -54,17 +65,23 @@ Inherits MCPKit.Tool
 		  Var script As String = _
 		  "Print BuildApp(" + buildType.ToString + ", " + revealStr + ")"
 
-		  // Builds can take a long time — use a 120 second timeout.
+		  // A build blocks the IDE's main thread, so it answers nothing until it is done.
+		  // The timeout is generous by default and only decides when we stop *waiting*:
+		  // the IDE finishes the build either way, and IDECommunicator keeps the socket
+		  // open so the IDE's late reply cannot kill it (see AddPending there). The old
+		  // 120 s limit, on a project that took 2.5 minutes, did exactly that.
 		  If App.IDE = Nil Then
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
 		  End If
 
-		  Var response As JSONItem = App.IDE.SendAndReceive(script, 120000)
+		  Var response As JSONItem = App.IDE.SendAndReceive(script, timeoutMS)
 		  If response = Nil Then
 		    If App.IDE.LastErrorMessage <> "" Then
 		      Return MCPKit.ToolResult.Failure(App.IDE.LastErrorMessage)
 		    End If
-		    Return MCPKit.ToolResult.Failure("Timeout waiting for build to complete (120s).")
+		    Var timeoutS As Integer = timeoutMS / 1000
+		    Return MCPKit.ToolResult.Failure("No answer from the IDE within " + timeoutS.ToString + " s. " + _
+		    "The build is still running in the IDE; wait for it to finish before calling any other tool.")
 		  End If
 
 		  If response.HasKey("response") Then
@@ -83,8 +100,12 @@ Inherits MCPKit.Tool
 		        Var resultJSON As New JSONItem(respStr)
 		        Return ParseBuildResult(resultJSON)
 		      Catch e As JSONException
-		        // Not JSON, so it is the path to the built app.
-		        Return MCPKit.ToolResult.Success("Build succeeded: " + respStr)
+		        // Not JSON, so it is the path to the built app. BuildApp answers it
+		        // shell-escaped on macOS and Linux ("Builds\ \-\ XMCP"); report it usable.
+		        Var message As String = "Build succeeded: " + App.IDE.UnescapeShellPath(respStr)
+		        Var warnings As String = App.IDE.ReplyWarnings(response)
+		        If warnings <> "" Then message = message + EndOfLine + "Warnings:" + EndOfLine + warnings
+		        Return MCPKit.ToolResult.Success(message)
 		      End Try
 		    Else
 		      // A build error arrives as a JSON object in the response envelope.
@@ -100,41 +121,37 @@ Inherits MCPKit.Tool
 
 	#tag Method, Flags = &h21
 		Private Function ParseBuildResult(resultJSON As JSONItem) As MCPKit.ToolResult
-		  /// Parses a JSON object returned in place of a build path.
-		  /// Failure: {"buildError": {"errors": [...]}} → formatted error list.
+		  /// Parses a JSON object returned in place of a build path: buildError with its
+		  /// errors and warnings, missingFiles (something must be configured first, e.g. an
+		  /// Android key store), openErrors and loadError. The formatting lives in
+		  /// IDECommunicator so every tool reports the same shapes the same way.
 
 		  If resultJSON.Count = 0 Then
 		    Return MCPKit.ToolResult.Failure("The IDE returned an empty result, so nothing was " + _
 		    "built. Check that the requested build type is a valid, enabled target for this project.")
 		  End If
 
-		  If resultJSON.HasKey("buildError") Then
-		    Var buildError As JSONItem = resultJSON.Value("buildError")
-		    If buildError.HasKey("errors") Then
-		      Var errors As JSONItem = buildError.Value("errors")
-		      Var lines() As String
-		      Var i As Integer
-		      For i = 0 To errors.Count - 1
-		        Var err As JSONItem = errors.Value(i)
-		        Var errType As String = If(err.HasKey("type"), err.Value("type").StringValue, "Error")
-		        Var msg As String = If(err.HasKey("message"), err.Value("message").StringValue, "")
-		        Var location As String = If(err.HasKey("location"), err.Value("location").StringValue, "")
-		        Var position As String = If(err.HasKey("position"), err.Value("position").StringValue, "")
-		        Var line As String = errType + ": " + msg
-		        If location <> "" Then line = line + " [" + location + "]"
-		        If position <> "" And position <> location Then line = line + " (" + position + ")"
-		        lines.Add(line)
-		      Next i
-		      Return MCPKit.ToolResult.Failure("Build errors (" + errors.Count.ToString + "):" + EndOfLine + String.FromArray(lines, EndOfLine))
-		    End If
-		    Return MCPKit.ToolResult.Failure("Build failed: " + buildError.ToString)
+		  // Wrap the object the way the IDE delivers it so the shared classifier can read it.
+		  Var envelope As New JSONItem
+		  envelope.Value("response") = resultJSON
+		  Var diagnostics As String = App.IDE.ReplyDiagnostics(envelope)
+		  If diagnostics <> "" Then
+		    Var warnings As String = App.IDE.ReplyWarnings(envelope)
+		    If warnings <> "" Then diagnostics = diagnostics + EndOfLine + "Warnings:" + EndOfLine + warnings
+		    Return MCPKit.ToolResult.Failure(diagnostics)
 		  End If
 
-		  // Unknown JSON structure — return raw for debugging.
-		  Return MCPKit.ToolResult.Failure("Build failed: " + resultJSON.ToString)
+		  // buildError with warnings only: BuildApp itself never reports warnings, so this is
+		  // rare, but it is not a failure. Nothing was built either, though, or a path would
+		  // have come back instead of an object.
+		  Return MCPKit.ToolResult.Failure("The IDE returned no build path: " + resultJSON.ToString)
 
 		End Function
 	#tag EndMethod
+
+
+	#tag Constant, Name = kDefaultTimeoutMS, Type = Double, Dynamic = False, Default = \"1800000", Scope = Private
+	#tag EndConstant
 
 
 	#tag ViewBehavior
