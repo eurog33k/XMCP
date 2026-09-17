@@ -107,8 +107,9 @@ Inherits MCPKit.Tool
 		  "Some commands also have no value to give - PropertyValue returns nothing for an item " + _
 		  "it does not support, since it only reads framework properties of items such as App " + _
 		  "or a Window. Neither case means the script failed: verify the effect in a separate " + _
-		  "call. Note that the IDE answers once per Print, so several Prints return several " + _
-		  "values; the first meaningful one is reported and the rest are attached.")
+		  "call. Note that the IDE answers once per Print, so several Prints send several " + _
+		  "replies; the first meaningful one is reported and the later ones are not returned. " + _
+		  "Print once, at the point whose value you want back.")
 
 		End Function
 	#tag EndMethod
