@@ -2,6 +2,13 @@
 
 All notable changes to XMCP will be documented here.
 
+## [1.11.0] - 2026-09-17
+
+### Added
+- **`write_file`, `read_file`, `hash_file`**: opt-in direct filesystem access for MCP clients with no file tools of their own (e.g. Claude Desktop), disabled by default and registered only with `--enable-file-tools`. Access is restricted to an allowlist of directories given via `--file-root` (comma-separated absolute paths, default `/tmp`), enforced by a new `FileGuard` module: paths are lexically canonicalised, then resolved through `realpath(3)` before comparison so a symlink inside an allowed root can't be used to escape it (residual risk: the check and the file open are separate syscalls, so a symlink swapped in between would still escape — recorded in `FileGuard`'s design notes). `write_file` accepts an optional `expected_hash` (from `hash_file`) and refuses the write if the file changed since it was hashed, so a concurrent edit is never silently discarded. `read_file` chunks by character offset (never splits a multibyte UTF-8 sequence) and returns content verbatim with no added header, so a round-trip `read_file` → `write_file` never corrupts the file. `hash_file` streams MD5/SHA-256 in 1 MB chunks via a shared `FileDigest` module, so file size isn't limited by available memory, and both tools compute digests through the same code so a staleness guard can never disagree with the hash a caller obtained.
+- **`ConfiguredTools()`**: `App` now builds its tool list once and reuses it for both startup registration and the `--help` tool count/list, so the two can no longer drift apart.
+- Original design and implementation by [@supcumps](https://github.com/supcumps) (Philip Cumpston) in #2, including the sandboxing model, the opt-in flag, and the symlink/staleness hardening added during review.
+
 ## [1.10.1] - 2026-09-08
 
 ### Fixed

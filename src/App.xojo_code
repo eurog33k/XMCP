@@ -118,43 +118,23 @@ Inherits MCPKit.ServerApplication
 		    If Verbose Then System.DebugLog("Docset registered: " + bundlePath.NativePath)
 		  Next pathValue
 
-		  // Register all MCP tools.
-		  RegisterTools( _
-		  New ListProjectItems, _
-		  New GetCurrentLocation, _
-		  New SelectProjectItem, _
-		  New GetCode, _
-		  New SetCode, _
-		  New GetSelectedText, _
-		  New SetSelectedText, _
-		  New BuildProject, _
-		  New RunProject, _
-		  New StopProject, _
-		  New CreateProjectItem, _
-		  New RunIDEScript, _
-		  New GetProjectInfo, _
-		  New GetItemDescription, _
-		  New ConstantValue, _
-		  New SearchDocs, _
-		  New SearchNotes, _
-		  New LookupClass, _
-		  New ListDocTopics, _
-		  New RevertProject, _
-		  New EstimateRequestCost, _
-		  New GetDebugLog, _
-		  New GetSystemLog, _
-		  New SaveProject, _
-		  New AnalyzeProject, _
-		  New DebugControl, _
-		  New ScaffoldCodeBlock, _
-		  New LintProjectFile, _
-		  New ListDocsets, _
-		  New SearchDocset, _
-		  New GetDocsetEntry _
-		  )
+		  // Configure the file tool sandbox (opt-in via --enable-file-tools).
+		  Var fileToolsEnabled As Boolean = CommandLineParser.BooleanValue("enable-file-tools", False)
+		  Var fileRoots As String = CommandLineParser.StringValue("file-root", "")
+		  FileGuard.Configure(fileToolsEnabled, fileRoots)
+		  If Verbose And fileToolsEnabled Then
+		    System.DebugLog("File tools enabled. Allowed roots: " + FileGuard.AllowedRootsDescription)
+		  End If
 
-		  If Verbose Then System.DebugLog("XMCP server configured with 31 tools.")
-		  
+		  // Register all MCP tools from the same list used by terminal help, so
+		  // the two can never drift apart.
+		  Var tools() As MCPKit.Tool = ConfiguredTools
+		  For Each tool As MCPKit.Tool In tools
+		    RegisterTools(tool)
+		  Next tool
+
+		  If Verbose Then System.DebugLog("XMCP server configured with " + tools.Count.ToString + " tools.")
+
 		End Sub
 	#tag EndEvent
 
@@ -163,7 +143,7 @@ Inherits MCPKit.ServerApplication
 		  If CommandLineParser.HelpRequested Then
 		    CommandLineParser.ShowHelp("Options")
 		    Print("")
-		    Print("MCP Tools (31):")
+		    Print("MCP Tools (" + ConfiguredTools.Count.ToString + "):")
 		    Print("")
 		    Print("  IDE Tools:")
 		    Print("  list_project_items   List child items at a project location")
@@ -187,6 +167,9 @@ Inherits MCPKit.ServerApplication
 		    Print("  debug_control        Step, resume, or pause an active debug session")
 		    Print("  scaffold_code_block  Generate a correctly formatted #tag block to insert")
 		    Print("  lint_project_file    Validate a .xojo_code/.xojo_window file for known errors")
+		    Print("  write_file           Write a file on disk (requires --enable-file-tools)")
+		    Print("  read_file            Read a file from disk (requires --enable-file-tools)")
+		    Print("  hash_file            Hash a file with MD5 or SHA256 (requires --enable-file-tools)")
 		    Print("")
 		    Print("  Documentation Tools:")
 		    Print("  search_docs          Search Xojo documentation (semantic/keyword)")
@@ -212,6 +195,10 @@ Inherits MCPKit.ServerApplication
 		    Print("")
 		    Print("  Third-party Dash/Zeal .docset bundles can be registered with")
 		    Print("  --docset-path (repeat the flag once per bundle).")
+		    Print("")
+		    Print("  The write_file/read_file/hash_file tools are disabled by default. Enable")
+		    Print("  them with --enable-file-tools and restrict access with --file-root, a")
+		    Print("  comma-separated list of absolute paths (default: /tmp).")
 		    Print("")
 		    Print("  Make sure the Xojo IDE is running before starting this server.")
 		    Print("")
@@ -242,10 +229,63 @@ Inherits MCPKit.ServerApplication
 		  // during parsing. Read as strings and build FolderItems ourselves below.
 		  CommandLineParser.AddOption("", "docset-path", "Path to a Dash/Zeal-style .docset bundle (repeatable)", MCPKit.OptionTypes.String)
 		  CommandLineParser.OptionValue("docset-path").IsArray = True
+		  CommandLineParser.AddOption("", "enable-file-tools", "Enable the write_file/read_file/hash_file tools (disabled by default)", MCPKit.OptionTypes.Boolean)
+		  CommandLineParser.AddOption("", "file-root", "Comma-separated absolute paths the file tools may access (default: /tmp)", MCPKit.OptionTypes.String)
 
 		End Sub
 	#tag EndEvent
 
+
+	#tag Method, Flags = &h21
+		Private Function ConfiguredTools() As MCPKit.Tool()
+		  /// Returns the complete tool list exposed by XMCP.
+		  /// Single source of truth for both startup registration (Configure)
+		  /// and the terminal --help tool count/list, so they cannot drift apart.
+
+		  Var tools() As MCPKit.Tool
+		  tools.Add(New ListProjectItems)
+		  tools.Add(New GetCurrentLocation)
+		  tools.Add(New SelectProjectItem)
+		  tools.Add(New GetCode)
+		  tools.Add(New SetCode)
+		  tools.Add(New GetSelectedText)
+		  tools.Add(New SetSelectedText)
+		  tools.Add(New BuildProject)
+		  tools.Add(New RunProject)
+		  tools.Add(New StopProject)
+		  tools.Add(New CreateProjectItem)
+		  tools.Add(New RunIDEScript)
+		  tools.Add(New GetProjectInfo)
+		  tools.Add(New GetItemDescription)
+		  tools.Add(New ConstantValue)
+		  tools.Add(New SearchDocs)
+		  tools.Add(New SearchNotes)
+		  tools.Add(New LookupClass)
+		  tools.Add(New ListDocTopics)
+		  tools.Add(New RevertProject)
+		  tools.Add(New EstimateRequestCost)
+		  tools.Add(New GetDebugLog)
+		  tools.Add(New GetSystemLog)
+		  tools.Add(New SaveProject)
+		  tools.Add(New AnalyzeProject)
+		  tools.Add(New DebugControl)
+		  tools.Add(New ScaffoldCodeBlock)
+		  tools.Add(New LintProjectFile)
+		  tools.Add(New ListDocsets)
+		  tools.Add(New SearchDocset)
+		  tools.Add(New GetDocsetEntry)
+		  // File tools are opt-in: direct filesystem access is a larger attack
+		  // surface than the IDE-mediated tools, so they require an explicit flag.
+		  If CommandLineParser.BooleanValue("enable-file-tools", False) Then
+		    tools.Add(New WriteFile)
+		    tools.Add(New ReadFile)
+		    tools.Add(New HashFile)
+		  End If
+
+		  Return tools
+
+		End Function
+	#tag EndMethod
 
 	#tag Method, Flags = &h21
 		Private Function CompareVersionNames(a As String, b As String) As Integer
