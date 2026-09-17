@@ -5,12 +5,15 @@ Inherits MCPKit.Tool
 		Sub Constructor()
 		  Super.Constructor("build_project", "Builds the current Xojo project using the IDE's configured Build Settings. Returns build errors on failure, or a success message on success.")
 
+		  Parameters.Add(New MCPKit.ToolParameter("timeout", MCPKit.ToolParameterTypes.Integer_, _
+		  "How long to wait for the build, in milliseconds. Default is 1800000 (30 minutes). Set it generously: giving up does not stop the build, it only means the result is not reported.", _
+		  True, CType(kDefaultTimeoutMS, Integer), False))
+		  
 		End Sub
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
 		Function Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult
-		  #Pragma Unused args
 
 		  // DoCommand "BuildApp" uses the IDE's configured Build Settings
 		  // (BuildMac, BuildWin32, etc.) chosen by the user in the IDE.
@@ -19,17 +22,24 @@ Inherits MCPKit.Tool
 		  Var script As String = "DoCommand ""BuildApp""" + EndOfLine + _
 		  "Print """""
 
-		  // Builds can take a long time — use a 120 second timeout.
+		  // Builds can take a long time; the wait is configurable and generous by default.
 		  If App.IDE = Nil Then
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
 		  End If
 
-		  Var response As JSONItem = App.IDE.SendAndReceive(script, 120000)
+		  Var timeoutMS As Integer = CType(kDefaultTimeoutMS, Integer)
+		  For Each arg As MCPKit.ToolArgument In args
+		    If arg.Name = "timeout" And arg.Value.IntegerValue > 0 Then timeoutMS = arg.Value.IntegerValue
+		  Next arg
+		  
+		  Var response As JSONItem = App.IDE.SendAndReceive(script, timeoutMS)
 		  If response = Nil Then
 		    If App.IDE.LastErrorMessage <> "" Then
 		      Return MCPKit.ToolResult.Failure(App.IDE.LastErrorMessage)
 		    End If
-		    Return MCPKit.ToolResult.Failure("Timeout waiting for build to complete (120s).")
+		    Var timeoutS As Integer = timeoutMS / 1000
+		    Return MCPKit.ToolResult.Failure("No answer from the IDE within " + timeoutS.ToString + "s. " + _
+		    "The build is still running in the IDE; wait for it to finish before calling any other tool.")
 		  End If
 
 		  If response.HasKey("response") Then
@@ -100,6 +110,9 @@ Inherits MCPKit.Tool
 	#tag EndMethod
 
 
+	#tag Constant, Name = kDefaultTimeoutMS, Type = Double, Dynamic = False, Default = \"1800000", Scope = Private
+	#tag EndConstant
+	
 	#tag ViewBehavior
 		#tag ViewProperty
 			Name="Name"
