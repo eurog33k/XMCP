@@ -274,7 +274,17 @@ Protected Class IDECommunicator
 		  Try
 		    sock.Connect
 		  Catch e As RuntimeException
-		    LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + ": " + e.Message
+		    // Whether this counts as 'nobody is listening' - and so as retryable - differs
+		    // by platform. Off Windows the Exists check above already ruled out a missing
+		    // socket, so a failed connect means something more specific (a stale socket from
+		    // a crashed IDE, a permission problem) and is reported as fatal, unchanged from
+		    // before. On Windows there is no such check to lean on, so a failed connect is
+		    // the only evidence that nothing is listening on this candidate.
+		    #If TargetWindows Then
+		      LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + ": " + e.Message
+		    #Else
+		      LastErrorMessage = "IPCSocket connect failed for " + candidatePath + ": " + e.Message
+		    #EndIf
 		    Return Nil
 		  End Try
 		  
@@ -293,8 +303,13 @@ Protected Class IDECommunicator
 		  
 		  If Not sock.IsConnected Then
 		    sock.Close
-		    LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + _
-		    " (connect timed out after " + connectTimeoutMS.ToString + "ms)."
+		    #If TargetWindows Then
+		      LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + _
+		      " (connect timed out after " + connectTimeoutMS.ToString + "ms)."
+		    #Else
+		      LastErrorMessage = "IPCSocket connect timed out for " + candidatePath + _
+		      " after " + connectTimeoutMS.ToString + "ms."
+		    #EndIf
 		    Return Nil
 		  End If
 
