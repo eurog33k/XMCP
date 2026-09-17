@@ -703,8 +703,8 @@ Protected Class IDECommunicator
 		  mPendingSinceUS.Add(System.Microseconds)
 		End Sub
 	#tag EndMethod
-	#tag Method, Flags = &h21
-		Private Function DrainPending() As Integer
+	#tag Method, Flags = &h0
+		Function DrainPending() As Integer
 		  /// Polls every parked socket and releases the ones the IDE is finished with: it
 		  /// wrote a reply (discarded - the caller gave up long ago), or it closed the
 		  /// connection (the IDE quit or crashed), or the socket has been parked longer
