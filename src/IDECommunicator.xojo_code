@@ -625,33 +625,6 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 	#tag Method, Flags = &h0
-		Function UnescapeShellPath(path As String) As String
-		  /// BuildApp and ProjectShellPath answer shell-escaped paths on macOS and Linux
-		  /// ("Builds\ \-\ XMCP/macOS\ Universal"). This removes the escaping so the result
-		  /// can be pasted or opened as it is. On Windows the backslash is the path separator
-		  /// and the IDE does not escape, so the path passes through untouched.
-		  
-		  #If TargetWindows Then
-		    Return path
-		  #Else
-		    Var out As String = ""
-		    Var chars() As String = path.Split("")
-		    Var i As Integer = 0
-		    While i <= chars.LastIndex
-		      If chars(i) = "\" And i < chars.LastIndex Then
-		        out = out + chars(i + 1)
-		        i = i + 2
-		      Else
-		        out = out + chars(i)
-		        i = i + 1
-		      End If
-		    Wend
-		    Return out
-		  #EndIf
-		End Function
-	#tag EndMethod
-
-	#tag Method, Flags = &h0
 		Function MergeReply(frames() As JSONItem) As JSONItem
 		  /// Folds the parts of one reply into a single envelope so callers keep reading
 		  /// response.Value("response") as before. The primary part is chosen by weight: an
