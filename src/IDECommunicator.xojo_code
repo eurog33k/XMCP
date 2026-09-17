@@ -330,7 +330,18 @@ Protected Class IDECommunicator
 		  Var buffer As String = ""
 		  Var hadData As Boolean = False
 		  
-		  While System.Microseconds < deadlineUS
+		  // One reply can arrive as several messages under the same tag: a script's Print
+		  // output and a compiler warning about it land about a millisecond apart, and an
+		  // analysis returns its buildError and the Print sentinel together. Returning on
+		  // the first frame made the answer whichever part won the race. After the first
+		  // matching frame the loop keeps reading for a short window and MergeReply folds
+		  // the parts. When the first part is only a warning the real output is still
+		  // coming and may take as long as the script itself, so that wait is longer and
+		  // ends as soon as any further part arrives.
+		  Var frames() As JSONItem
+		  Var collectUntilUS As Double = deadlineUS
+		  
+		  While System.Microseconds < deadlineUS And System.Microseconds < collectUntilUS
 		    sock.Poll
 
 		    Var chunk As String = sock.ReadAll
@@ -353,15 +364,31 @@ Protected Class IDECommunicator
 		      Try
 		        Var response As New JSONItem(frame)
 		        If response.HasKey("tag") And response.Value("tag").StringValue = tag Then
-		          sock.Close
-		          LastErrorMessage = ""
-		          Return response
+		          frames.Add(response)
+		          If frames.Count = 1 Then
+		            If ReplyKind(response) = "warning" Then
+		              collectUntilUS = System.Microseconds + (kSplitWaitForOutputMS * 1000.0)
+		            Else
+		              collectUntilUS = System.Microseconds + (kSplitReplyWindowMS * 1000.0)
+		            End If
+		          ElseIf ReplyKind(frames(0)) = "warning" Then
+		            // The output the warning was holding up has arrived; nothing else is coming.
+		            collectUntilUS = System.Microseconds
+		          End If
+		        Else
+		          LogVerbose("IDE request " + tag + ": ignoring a frame for another tag (stale or unsolicited).")
 		        End If
 		      Catch e As JSONException
 		        // Ignore malformed chunks and continue.
 		      End Try
 		    Wend
 		  Wend
+		  
+		  If frames.Count > 0 Then
+		    sock.Close
+		    LastErrorMessage = ""
+		    Return MergeReply(frames)
+		  End If
 		  
 		  sock.Close
 		  
@@ -604,6 +631,48 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h0
+		Function MergeReply(frames() As JSONItem) As JSONItem
+		  /// Folds the parts of one reply into a single envelope so callers keep reading
+		  /// response.Value("response") as before. The primary part is chosen by weight: an
+		  /// error beats output, output beats an empty answer, and a warning is primary only
+		  /// when it is all there is. Every other part is attached under "xmcp_parts" (their
+		  /// "response" values) so a tool can still report, say, the compiler warning that
+		  /// accompanied a successful script - see ReplyWarnings.
+		  
+		  If frames.Count = 0 Then Return Nil
+		  If frames.Count = 1 Then Return frames(0)
+		  
+		  Var primary As Integer = -1
+		  Var rank() As String = Array("error", "output", "empty", "warning", "unknown")
+		  For r As Integer = 0 To rank.LastIndex
+		    For i As Integer = 0 To frames.LastIndex
+		      Var kind As String = ReplyKind(frames(i))
+		      If kind = rank(r) Then
+		        // Among outputs, prefer one that actually says something.
+		        If kind = "output" And frames(i).Value("response").Type = Variant.TypeString And _
+		          frames(i).Value("response").StringValue = "" Then Continue
+		        primary = i
+		        Exit For i
+		      End If
+		    Next i
+		    If primary >= 0 Then Exit For r
+		  Next r
+		  If primary < 0 Then primary = 0
+		  
+		  Var merged As JSONItem = frames(primary)
+		  Var parts As New JSONItem("[]")
+		  For i As Integer = 0 To frames.LastIndex
+		    If i = primary Then Continue
+		    If frames(i).HasKey("response") Then parts.Add(frames(i).Value("response"))
+		  Next i
+		  If parts.Count > 0 Then merged.Value("xmcp_parts") = parts
+		  
+		  LogVerbose("Merged " + frames.Count.ToString + " reply parts; primary kind " + ReplyKind(merged) + ".")
+		  Return merged
+		End Function
+	#tag EndMethod
+
 	#tag Property, Flags = &h0
 		LastErrorMessage As String
 	#tag EndProperty
@@ -625,6 +694,12 @@ Protected Class IDECommunicator
 	#tag EndConstant
 	
 	#tag Constant, Name = kNoListenerPrefix, Type = String, Dynamic = False, Default = \"IPC socket not found", Scope = Private
+	#tag EndConstant
+	
+	#tag Constant, Name = kSplitReplyWindowMS, Type = Double, Dynamic = False, Default = \"250", Scope = Private, Description = 486F77206C6F6E6720746F206B6565702072656164696E6720666F72206D6F726520706172747320616674657220746865206669727374206D61746368696E67207265706C79206672616D652C20696E206D696C6C697365636F6E64732E
+	#tag EndConstant
+	
+	#tag Constant, Name = kSplitWaitForOutputMS, Type = Double, Dynamic = False, Default = \"30000", Scope = Private, Description = 486F77206C6F6E6720746F207761697420666F7220746865207363726970742773207265616C206F7574707574207768656E206F6E6C79206120636F6D70696C6572207761726E696E6720686173206172726976656420736F206661722C20696E206D696C6C697365636F6E64732E
 	#tag EndConstant
 	
 	#tag ViewBehavior
