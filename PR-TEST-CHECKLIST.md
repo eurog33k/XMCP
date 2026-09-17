@@ -289,3 +289,25 @@ produced a correct 7,168,512-byte PE with the copy step absent entirely. The
 `#If TargetWindows` branches compiled for the first time here and were clean.
 `XOJO_IPCPATH` was tested both ways: a valid name reached a dedicated IDE, and
 clearing it made that same IDE unreachable, so the first result was not a false pass.
+
+---
+
+## Addendum 2026-09-17 — `fd5d9ed`
+
+PR 1 is now 5 commits / 7 files. The extra file is `src/Build Automation.xojo_code`:
+the Windows `BuildStepList` gained `CopyUsageGuideWindows` and
+`CopyExamplesFolderWindows`, named distinctly from the macOS pair.
+
+Re-verified after the rebase and this fix, both platforms: lint clean on all four
+changed sources, `analyze_project` clean, builds, binary handshakes and round-trips
+`get_project_info`. Windows `--help` reports 30 tools with `get_system_log` absent
+and the same single candidate path. Windows build output now contains
+`usage-guide.md` and `examples\` with no manual step.
+
+**New Gate A check earned by this:** after any change to build automation, delete the
+artefacts from the build output *before* rebuilding. Otherwise a surviving file from
+an earlier manual copy reads as a pass.
+
+**Unrelated finding to pass to upstream:** the newly merged file tools default their
+sandbox root to `/tmp` - a POSIX path - on every platform, so on Windows the default
+`--file-root` cannot exist. Harmless while the tools are opt-in and off by default.

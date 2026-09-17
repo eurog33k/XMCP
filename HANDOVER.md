@@ -18,6 +18,33 @@ worth nothing.
 
 ---
 
+## 2026-09-17 — both sides — `fd5d9ed`: Windows build now copies its own resources
+
+Verified on Windows by deleting both resources from the build output, rebuilding,
+and watching them come back: `examples\` at the build timestamp, `usage-guide.md`
+at 37,106 bytes carrying the source file's mtime (the copy preserves it, same as
+macOS). macOS output unchanged and still handshakes.
+
+**What this fixes, which we first mis-scoped.** The Windows `BuildStepList` had only
+`BuildProjectStep`. `FormatRules.Load()` reads `usage-guide.md` from beside the
+executable, so `lint_project_file` and `scaffold_code_block` failed on *every*
+Windows build with "usage-guide.md not found next to the XMCP executable", and the
+`file://usage-guide.md` and `file://examples/<name>` MCP resources were absent.
+When the Windows build first produced no guide, the macOS side called it
+"pre-existing, worth documenting" and moved on - it is a functional gap, not a
+documentation one, and a manual copy early in the session masked it until a rebuild
+cleared the folder.
+
+Two process errors worth not repeating:
+
+- The Windows session reported "the Windows BuildStepList still has no
+  CopyFilesBuildStep entries" *after* the fix was pulled. The claim came from its
+  earlier read of the file rather than a fresh one. Re-read a file after a
+  `git reset --hard` before asserting anything about it.
+- The first attempt to verify the fix left the hand-placed copies in the folder, so
+  it could not have proved anything either way. "The files are still there" is not
+  evidence that the build produced them. Delete, then rebuild.
+
 ## 2026-09-17 — Windows side — PR 1 verified, commit `e2053cf`
 
 Fresh clone at `C:\XMCP-src`, Xojo 2026r2.1, target `Windows 64 bit`.
