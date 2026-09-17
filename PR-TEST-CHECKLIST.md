@@ -190,32 +190,41 @@ the IDE's own Analyze output at least once per PR and confirm the two agree.
 | # | Check | mac | win |
 |---|-------|-----|-----|
 | 2.1 | A timed-out request does not SIGPIPE the next one; socket held, not closed | ✅ | ☐ |
-| 2.2 | Split reply merged: a script that prints **and** raises a compiler warning reports both | ☐ | ☐ |
-| 2.3 | `buildError` + `Print` sentinel arriving together resolve to the error | ☐ | ☐ |
+| 2.2 | Split reply merged: a script that prints **and** raises a compiler warning reports both | ✅ | ☐ |
+| 2.3 | `buildError` + `Print` sentinel arriving together resolve to the error | ✅ | ☐ |
 | 2.4 | Warnings-only reply is treated as success, not failure | ✅ | ✅ |
-| 2.5 | A failing build reports the **compile error**, not a 30 s IPC timeout | ☐ | ☐ |
+| 2.5 | A failing build reports the **compile error**, not a 30 s IPC timeout | ✅ | ☐ |
 | 2.6 | Script error line numbers match what the IDE shows (off-by-one boilerplate) | ✅ | ✅ |
 
 
 ### PR 2 status — opened as #11 at `66158a3`, 2026-09-17
 
-Gate A passes on both platforms. Of PR 2's own six checks, **three are verified and
-three are not**, and the PR description does not claim otherwise.
+**All six checks verified on macOS.** Gate A green on both platforms.
 
-Verified: 2.1 parking (macOS — park, refuse, drain, resume, IDE alive afterwards),
-2.4 warnings-only via `analyze_project` on both, 2.6 line numbers on both — the old
-build reported line 2 for a one-line script, this one reports line 1.
+- **2.1** park, refuse, drain, resume; IDE alive afterwards
+- **2.2** `Var i As Integer = 3.7` + `Print "out"` returns the output *and* the
+  attached `scriptCompilerWarning` about the narrowing conversion — the case the
+  whole merge exists for, and the one first-frame-wins could only answer half of
+- **2.3** `Merged 2 reply parts; primary kind error` on a failing build
+- **2.4** warnings-only via `analyze_project`, cross-checked against the IDE
+- **2.5** `Build errors (2): Code: This item does not exist [MyClass.Greet]...` —
+  the real compile errors, not an IPC timeout
+- **2.6** line numbers: the pre-merge build reported line 2 for a one-line script,
+  this one reports line 1
 
-**Not verified, all three for the same reason** — they need a project that fails to
-build, and the only project to hand is the one under test:
+How 2.2/2.3/2.5 were finally tested, having been deferred for hours as "needs a
+project that fails to build": **`src/examples/Examples.xojo_project` is one.** It is a
+real, separate, buildable project that ships in this repo, so a deliberate compile
+error in `MyClass.Greet` exercises the whole failing-build path without touching the
+project under review. Restored immediately afterwards; `git status` clean.
 
-- **2.2** a script that prints *and* raises a compiler warning, reporting both
-- **2.3** `buildError` + `Print` sentinel arriving together resolving to the error
-- **2.5** a failing build reporting the compile error rather than an IPC timeout
+Incidental, and a good sign: `run_project` on the broken project timed out at 30 s
+and **parked**, reporting that the IDE was busy rather than closing the socket into
+it. That is the parking behaviour working in a scenario nobody staged.
 
-2.1 is untested on Windows. The SIGPIPE crash it guards against is a Unix domain
-socket problem, so the platform where it matters is the one covered — but the
-parking *logic* runs on both and has only been exercised on one.
+Still untested on Windows: 2.1 through 2.3, 2.5. The SIGPIPE crash 2.1 guards is a
+Unix domain socket problem so the platform that matters is covered, but the logic
+runs on both.
 
 ## PR 3 — XojoKit parser
 
