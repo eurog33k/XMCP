@@ -150,12 +150,20 @@ not change when git rewrites the files under it.
 
 ---
 
+
+**A2 can lie about itself.** On 2026-09-17 a change to reply merging made
+`analyze_project` report "No errors or warnings found" while the IDE's Analyze pane
+showed two warnings: the merge ranked an empty reply above the warning frame and
+dropped it. Every "A2 clean" result for hours was measuring a broken checker. No
+automated step could catch this, because the tool under test *was* the check. Read
+the IDE's own Analyze output at least once per PR and confirm the two agree.
+
 ## Gate A — every PR, both platforms
 
 | # | Check | mac | win |
 |---|-------|-----|-----|
 | A1 | `lint_project_file` clean on every edited `.xojo_code` / `.xojo_window` | ✅ |  ✅ |
-| A2 | `analyze_project` (full project scope) — no errors, no new warnings | ✅ |  ✅ |
+| A2 | `analyze_project` (full project scope) — no errors, no new warnings. **Cross-check once against the IDE's own Analyze pane** — a change can break the checking tool, and then it cannot report its own breakage | ✅ |  ✅ |
 | A3 | `build_project` succeeds for **the target you ship**. On macOS pass `build_type: 24` or `16`; omitting it resolves to Universal, which the Xojo bug always corrupts, so A3-with-no-target cannot pass on macOS and measures Xojo rather than the PR. On Windows, omit it | ✅ |  ✅ |
 | A4 | **Built file is actually an executable** — `file` reports Mach-O / PE32+, not text. **macOS Universal only**: a `CopyFilesBuildStep` overwrites the binary with `usage-guide.md` and still reports success. macOS 64 bit and ARM 64 are both correct. Check `file` on the target you actually ship | ✅ |  ✅ |
 | A5 | Binary starts — `probe-handshake.py` returns `serverInfo`. (Do not pipe into it by hand; it does not exit on stdin EOF) | ✅ |  ✅ |
@@ -181,12 +189,33 @@ not change when git rewrites the files under it.
 
 | # | Check | mac | win |
 |---|-------|-----|-----|
-| 2.1 | A timed-out request does not SIGPIPE the next one; socket held, not closed | ☐ | ☐ |
+| 2.1 | A timed-out request does not SIGPIPE the next one; socket held, not closed | ✅ | ☐ |
 | 2.2 | Split reply merged: a script that prints **and** raises a compiler warning reports both | ☐ | ☐ |
 | 2.3 | `buildError` + `Print` sentinel arriving together resolve to the error | ☐ | ☐ |
-| 2.4 | Warnings-only reply is treated as success, not failure | ☐ | ☐ |
+| 2.4 | Warnings-only reply is treated as success, not failure | ✅ | ✅ |
 | 2.5 | A failing build reports the **compile error**, not a 30 s IPC timeout | ☐ | ☐ |
-| 2.6 | Script error line numbers match what the IDE shows (off-by-one boilerplate) | ☐ | ☐ |
+| 2.6 | Script error line numbers match what the IDE shows (off-by-one boilerplate) | ✅ | ✅ |
+
+
+### PR 2 status — opened as #11 at `66158a3`, 2026-09-17
+
+Gate A passes on both platforms. Of PR 2's own six checks, **three are verified and
+three are not**, and the PR description does not claim otherwise.
+
+Verified: 2.1 parking (macOS — park, refuse, drain, resume, IDE alive afterwards),
+2.4 warnings-only via `analyze_project` on both, 2.6 line numbers on both — the old
+build reported line 2 for a one-line script, this one reports line 1.
+
+**Not verified, all three for the same reason** — they need a project that fails to
+build, and the only project to hand is the one under test:
+
+- **2.2** a script that prints *and* raises a compiler warning, reporting both
+- **2.3** `buildError` + `Print` sentinel arriving together resolving to the error
+- **2.5** a failing build reporting the compile error rather than an IPC timeout
+
+2.1 is untested on Windows. The SIGPIPE crash it guards against is a Unix domain
+socket problem, so the platform where it matters is the one covered — but the
+parking *logic* runs on both and has only been exercised on one.
 
 ## PR 3 — XojoKit parser
 
