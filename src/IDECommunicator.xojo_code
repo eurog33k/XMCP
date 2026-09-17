@@ -640,8 +640,8 @@ Protected Class IDECommunicator
 		Private Function MergeReply(frames() As JSONItem) As JSONItem
 		  /// Folds the parts of one reply into a single envelope so callers keep reading
 		  /// response.Value("response") as before. The primary part is chosen by weight: an
-		  /// error beats output, output beats an empty answer, and a warning is primary only
-		  /// when it is all there is. Every other part is attached under "xmcp_parts" (their
+		  /// error beats output, output beats a warning, and a warning beats an empty answer -
+		  /// an empty reply carries nothing, so it must never displace a warning. Every other part is attached under "xmcp_parts" (their
 		  /// "response" values) so a tool can still report, say, the compiler warning that
 		  /// accompanied a successful script - see ReplyWarnings.
 		  
@@ -649,7 +649,7 @@ Protected Class IDECommunicator
 		  If frames.Count = 1 Then Return frames(0)
 		  
 		  Var primary As Integer = -1
-		  Var rank() As String = Array("error", "output", "empty", "warning", "unknown")
+		  Var rank() As String = Array("error", "output", "warning", "empty", "unknown")
 		  For r As Integer = 0 To rank.LastIndex
 		    For i As Integer = 0 To frames.LastIndex
 		      Var kind As String = ReplyKind(frames(i))
