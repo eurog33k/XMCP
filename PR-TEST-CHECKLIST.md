@@ -199,9 +199,9 @@ nearly 3x the old cap. Keep a genuinely large project to hand for timeout work;
 |---|-------|-----|-----|
 | 2.1 | A timed-out request does not SIGPIPE the next one; socket held, not closed | ✅ | ☐ |
 | 2.2 | Split reply merged: a script that prints **and** raises a compiler warning reports both | ✅ | ☐ |
-| 2.3 | `buildError` + `Print` sentinel arriving together resolve to the error | ✅ | ☐ |
+| 2.3 | `buildError` + `Print` sentinel arriving together resolve to the error | ✅ | ✅ |
 | 2.4 | Warnings-only reply is treated as success, not failure | ✅ | ✅ |
-| 2.5 | A failing build reports the **compile error**, not a 30 s IPC timeout | ✅ | ☐ |
+| 2.5 | A failing build reports the **compile error**, not a 30 s IPC timeout | ✅ | ✅ |
 | 2.6 | Script error line numbers match what the IDE shows (off-by-one boilerplate) | ✅ | ✅ |
 
 
@@ -233,6 +233,21 @@ it. That is the parking behaviour working in a scenario nobody staged.
 Still untested on Windows: 2.1 through 2.3, 2.5. The SIGPIPE crash 2.1 guards is a
 Unix domain socket problem so the platform that matters is covered, but the logic
 runs on both.
+
+
+### Timeout coverage — read before ticking anything as "timeout verified"
+
+The configurable-timeout change is verified on **macOS only**, by a 335 s build of a
+large real project. Windows has *not* exercised it: the failing-build run there
+completed in **13 s**, because the plugin compilation was already cached from an
+earlier cold build. The same scenario had overrun 120 s when cold.
+
+So on Windows what is proven is the *error reporting* and that the listener no longer
+dies — not that the new default rescues a long build. Reproducing that needs a cold
+Desktop build there, and nobody has forced one.
+
+Also unattributed: the passing Windows run both reverted first *and* carried the
+fixes. Either could account for the improvement over the run that killed the listener.
 
 ## PR 3 — XojoKit parser
 
