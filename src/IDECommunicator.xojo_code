@@ -375,6 +375,235 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h0
+		Function ReplyKind(envelope As JSONItem) As String
+		  /// Classifies one reply envelope by what its "response" carries:
+		  ///   "output"  - a string (what the script printed), or an object that is none of the below
+		  ///   "empty"   - an empty object: the IDE's answer to a script that printed nothing
+		  ///   "warning" - diagnostics that are warnings only; the script or build still ran
+		  ///   "error"   - scriptError with errors, buildError with errors, missingFiles, openErrors, loadError
+		  ///   "unknown" - no "response" key at all
+		  ///
+		  /// scriptError is a heterogeneous array: each entry has a "type" that is
+		  /// scriptCompilerError, scriptRuntimeError or scriptCompilerWarning, and a reply that
+		  /// carries only warnings means the script compiled and ran. Treating the whole array as
+		  /// fatal reported failures for scripts that had worked.
+		  
+		  If envelope = Nil Or Not envelope.HasKey("response") Then Return "unknown"
+		  
+		  Var resp As Variant = envelope.Value("response")
+		  If resp.Type = Variant.TypeString Then Return "output"
+		  
+		  Var obj As JSONItem
+		  Try
+		    obj = envelope.Value("response")
+		  Catch e As RuntimeException
+		    Return "output"
+		  End Try
+		  If obj = Nil Then Return "output"
+		  If obj.Count = 0 Then Return "empty"
+		  
+		  If obj.HasKey("scriptError") Then
+		    Var items As JSONItem = obj.Value("scriptError")
+		    If items <> Nil And items.IsArray Then
+		      For i As Integer = 0 To items.Count - 1
+		        Var entry As JSONItem = items.ChildAt(i)
+		        Var kind As String = If(entry <> Nil And entry.HasKey("type"), entry.Value("type").StringValue, "")
+		        If Not kind.Lowercase.EndsWith("warning") Then Return "error"
+		      Next i
+		      Return "warning"
+		    End If
+		    Return "error"
+		  End If
+		  
+		  If obj.HasKey("buildError") Then
+		    Var be As JSONItem = obj.Value("buildError")
+		    If be <> Nil And be.HasKey("errors") Then
+		      Var errs As JSONItem = be.Value("errors")
+		      If errs <> Nil And errs.Count > 0 Then Return "error"
+		    End If
+		    If be <> Nil And be.HasKey("warnings") Then
+		      Var warns As JSONItem = be.Value("warnings")
+		      If warns <> Nil And warns.Count > 0 Then Return "warning"
+		    End If
+		    Return "empty"
+		  End If
+		  
+		  If obj.HasKey("missingFiles") Or obj.HasKey("openErrors") Or obj.HasKey("loadError") Then Return "error"
+		  
+		  Return "output"
+		End Function
+	#tag EndMethod
+	#tag Method, Flags = &h0
+		Function ReplyDiagnostics(envelope As JSONItem) As String
+		  /// The reply's blocking diagnostics as readable text, or "" when there are none -
+		  /// that is, when the reply is output, empty, or warnings only. Covers every error
+		  /// shape the IDE is known to send: scriptError (errors only; warnings are for
+		  /// ReplyWarnings), buildError.errors, missingFiles, openErrors and loadError.
+		  ///
+		  /// missingFiles is undocumented but real: an Android build with no key store answers
+		  /// {"missingFiles": "Unable to build. Please specify a Key Store properties file..."},
+		  /// a precise message that used to be dropped as an unrecognised object.
+		  
+		  If ReplyKind(envelope) <> "error" Then Return ""
+		  
+		  Var obj As JSONItem = envelope.Value("response")
+		  Var lines() As String
+		  
+		  If obj.HasKey("scriptError") Then
+		    Var text As String = FormatScriptErrors(obj.Value("scriptError"), False)
+		    If text <> "" Then lines.Add("Script errors:" + EndOfLine + text)
+		  End If
+		  If obj.HasKey("buildError") Then
+		    Var be As JSONItem = obj.Value("buildError")
+		    If be <> Nil And be.HasKey("errors") Then
+		      Var errs As JSONItem = be.Value("errors")
+		      If errs <> Nil And errs.Count > 0 Then
+		        lines.Add("Build errors (" + errs.Count.ToString + "):" + EndOfLine + FormatDiagnosticList(errs, "Error"))
+		      End If
+		    End If
+		  End If
+		  If obj.HasKey("missingFiles") Then
+		    lines.Add("The IDE needs something configured before it can build: " + obj.Value("missingFiles").StringValue)
+		  End If
+		  If obj.HasKey("openErrors") Then
+		    lines.Add("The project reported errors while opening: " + JSONItem(obj.Value("openErrors")).ToString)
+		  End If
+		  If obj.HasKey("loadError") Then
+		    lines.Add("The project could not be loaded: " + JSONItem(obj.Value("loadError")).ToString)
+		  End If
+		  
+		  If lines.Count = 0 Then Return "The IDE returned an error: " + obj.ToString
+		  Return String.FromArray(lines, EndOfLine)
+		End Function
+	#tag EndMethod
+	#tag Method, Flags = &h0
+		Function ReplyWarnings(envelope As JSONItem) As String
+		  /// Warnings carried by the reply - in its primary part or in any part MergeReply
+		  /// attached - as readable text, or "" when there are none. For a successful script
+		  /// this is typically a scriptCompilerWarning about the script XMCP itself sent.
+		  
+		  If envelope = Nil Then Return ""
+		  Var lines() As String
+		  
+		  Var candidates() As JSONItem
+		  If envelope.HasKey("response") And envelope.Value("response").Type <> Variant.TypeString Then
+		    Try
+		      candidates.Add(JSONItem(envelope.Value("response")))
+		    Catch e As RuntimeException
+		    End Try
+		  End If
+		  If envelope.HasKey("xmcp_parts") Then
+		    Var parts As JSONItem = envelope.Value("xmcp_parts")
+		    For i As Integer = 0 To parts.Count - 1
+		      Try
+		        If parts.ChildAt(i) <> Nil Then candidates.Add(parts.ChildAt(i))
+		      Catch e As RuntimeException
+		      End Try
+		    Next i
+		  End If
+		  
+		  For Each obj As JSONItem In candidates
+		    If obj.HasKey("scriptError") Then
+		      Var text As String = FormatScriptErrors(obj.Value("scriptError"), True)
+		      If text <> "" Then lines.Add(text)
+		    End If
+		    If obj.HasKey("buildError") Then
+		      Var be As JSONItem = obj.Value("buildError")
+		      If be <> Nil And be.HasKey("warnings") Then
+		        Var warns As JSONItem = be.Value("warnings")
+		        If warns <> Nil And warns.Count > 0 Then lines.Add(FormatDiagnosticList(warns, "Warning"))
+		      End If
+		    End If
+		  Next obj
+		  
+		  Return String.FromArray(lines, EndOfLine)
+		End Function
+	#tag EndMethod
+	#tag Method, Flags = &h21
+		Private Function FormatScriptErrors(items As JSONItem, warningsOnly As Boolean) As String
+		  /// One line per scriptError entry of the requested severity. The IDE wraps the
+		  /// script in a line of boilerplate before compiling it, so every line number it
+		  /// reports is one greater than the line that was sent; that offset is removed here.
+		  /// A line too small to carry the offset passes through unchanged. Column -1 means
+		  /// unknown and is omitted.
+		  
+		  If items = Nil Then Return ""
+		  Var lines() As String
+		  If Not items.IsArray Then Return items.ToString
+		  
+		  For i As Integer = 0 To items.Count - 1
+		    Var entry As JSONItem = items.ChildAt(i)
+		    If entry = Nil Then Continue
+		    Var kind As String = If(entry.HasKey("type"), entry.Value("type").StringValue, "")
+		    Var isWarning As Boolean = kind.Lowercase.EndsWith("warning")
+		    If isWarning <> warningsOnly Then Continue
+		    
+		    Var text As String = If(kind = "", If(warningsOnly, "Warning", "Error"), kind)
+		    If entry.HasKey("message") Then text = text + ": " + entry.Value("message").StringValue
+		    If entry.HasKey("line") Then
+		      Var line As Integer = entry.Value("line").IntegerValue
+		      If line >= 2 Then line = line - 1
+		      If line > 0 Then text = text + " (line " + line.ToString + ")"
+		    End If
+		    If entry.HasKey("column") Then
+		      Var column As Integer = entry.Value("column").IntegerValue
+		      If column >= 0 Then text = text + " (column " + column.ToString + ")"
+		    End If
+		    lines.Add(text)
+		  Next i
+		  
+		  Return String.FromArray(lines, EndOfLine)
+		End Function
+	#tag EndMethod
+	#tag Method, Flags = &h21
+		Private Function FormatDiagnosticList(list As JSONItem, defaultType As String) As String
+		  /// One line per buildError entry: type, message, location and position.
+		  
+		  If list = Nil Then Return ""
+		  Var lines() As String
+		  For i As Integer = 0 To list.Count - 1
+		    Var err As JSONItem = list.ChildAt(i)
+		    If err = Nil Then Continue
+		    Var errType As String = If(err.HasKey("type"), err.Value("type").StringValue, defaultType)
+		    Var msg As String = If(err.HasKey("message"), err.Value("message").StringValue, "")
+		    Var location As String = If(err.HasKey("location"), err.Value("location").StringValue, "")
+		    Var position As String = If(err.HasKey("position"), err.Value("position").StringValue, "")
+		    Var line As String = errType + ": " + msg
+		    If location <> "" Then line = line + " [" + location + "]"
+		    If position <> "" And position <> location Then line = line + " (" + position + ")"
+		    lines.Add(line)
+		  Next i
+		  Return String.FromArray(lines, EndOfLine)
+		End Function
+	#tag EndMethod
+	#tag Method, Flags = &h0
+		Function UnescapeShellPath(path As String) As String
+		  /// BuildApp and ProjectShellPath answer shell-escaped paths on macOS and Linux
+		  /// ("Builds\ \-\ XMCP/macOS\ Universal"). This removes the escaping so the result
+		  /// can be pasted or opened as it is. On Windows the backslash is the path separator
+		  /// and the IDE does not escape, so the path passes through untouched.
+		  
+		  #If TargetWindows Then
+		    Return path
+		  #Else
+		    Var out As String = ""
+		    Var chars() As String = path.Split("")
+		    Var i As Integer = 0
+		    While i <= chars.LastIndex
+		      If chars(i) = "\" And i < chars.LastIndex Then
+		        out = out + chars(i + 1)
+		        i = i + 2
+		      Else
+		        out = out + chars(i)
+		        i = i + 1
+		      End If
+		    Wend
+		    Return out
+		  #EndIf
+		End Function
+	#tag EndMethod
+
 	#tag Property, Flags = &h0
 		LastErrorMessage As String
 	#tag EndProperty
