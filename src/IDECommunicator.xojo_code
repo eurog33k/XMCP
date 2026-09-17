@@ -544,24 +544,36 @@ Protected Class IDECommunicator
 		    Var parts As JSONItem = envelope.Value("xmcp_parts")
 		    For i As Integer = 0 To parts.Count - 1
 		      Try
-		        If parts.ChildAt(i) <> Nil Then candidates.Add(parts.ChildAt(i))
+		        // Only objects. MergeReply attaches the other parts' response VALUES, and
+		        // for a multi-Print script those are plain strings - asking one of those
+		        // HasKey raises, and the exception escaped as a JSON-RPC parse error.
+		        Var child As JSONItem = parts.ChildAt(i)
+		        If child <> Nil And Not child.IsArray Then candidates.Add(child)
 		      Catch e As RuntimeException
 		      End Try
 		    Next i
 		  End If
 		  
 		  For Each obj As JSONItem In candidates
-		    If obj.HasKey("scriptError") Then
-		      Var text As String = FormatScriptErrors(obj.Value("scriptError"), True)
-		      If text <> "" Then lines.Add(text)
-		    End If
-		    If obj.HasKey("buildError") Then
-		      Var be As JSONItem = obj.Value("buildError")
-		      If be <> Nil And be.HasKey("warnings") Then
-		        Var warns As JSONItem = be.Value("warnings")
-		        If warns <> Nil And warns.Count > 0 Then lines.Add(FormatDiagnosticList(warns, "Warning"))
+		    If obj = Nil Or obj.IsArray Then Continue
+		    
+		    // A reply part can be any JSON the IDE chose to send. Reading warnings out of
+		    // one must never fail the whole request: there is nothing to report from a part
+		    // that is not an object, and that is not an error.
+		    Try
+		      If obj.HasKey("scriptError") Then
+		        Var text As String = FormatScriptErrors(obj.Value("scriptError"), True)
+		        If text <> "" Then lines.Add(text)
 		      End If
-		    End If
+		      If obj.HasKey("buildError") Then
+		        Var be As JSONItem = obj.Value("buildError")
+		        If be <> Nil And be.HasKey("warnings") Then
+		          Var warns As JSONItem = be.Value("warnings")
+		          If warns <> Nil And warns.Count > 0 Then lines.Add(FormatDiagnosticList(warns, "Warning"))
+		        End If
+		      End If
+		    Catch e As RuntimeException
+		    End Try
 		  Next obj
 		  
 		  Return String.FromArray(lines, EndOfLine)
