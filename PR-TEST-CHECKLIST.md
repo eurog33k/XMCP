@@ -121,6 +121,35 @@ are linting and reading a different byte stream there, which is precisely where 
 
 ---
 
+## Precondition — the IDE does not know git exists
+
+Run **`revert_project` after any git operation that changes files**: `switch`,
+`checkout`, `rebase`, `reset --hard`, `merge`, `stash`. The Xojo IDE holds the
+project it last loaded; git rewriting the working tree underneath it changes
+nothing in the IDE's memory.
+
+Skipping this does not produce an error. It produces a **clean pass against the
+wrong code** — `analyze_project` reports no errors, `build_project` builds, and
+every result describes a branch you are no longer on. It is the same failure shape
+as building one target and generalising from it.
+
+Caught 2026-09-17: a rebase checked out `theme/ide-connection` while the IDE still
+held `theme/connect-cleanup`. Nothing had been measured in that window, but the
+next `analyze_project` would have been meaningless and would have looked fine.
+
+Cheap confirmation that the IDE matches disk, using something only the current
+branch has:
+
+```
+describe_item <Class>.<MemberOnlyThisBranchHas>   # reads disk
+analyze_project                                    # reads the IDE
+```
+
+`get_project_info` is not sufficient — it reports the project *path*, which does
+not change when git rewrites the files under it.
+
+---
+
 ## Gate A — every PR, both platforms
 
 | # | Check | mac | win |
