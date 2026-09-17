@@ -89,7 +89,21 @@ Protected Class IDECommunicator
 		  /// may have already executed it — resending could run it twice.
 
 		  LastErrorMessage = ""
-
+		  mParkedThisRequest = False
+		  
+		  // A request the IDE has accepted but not answered is still being executed: the
+		  // IDE runs scripts one at a time on its main thread, and a build (or a modal
+		  // dialog) holds it for minutes. Sending another request now would only queue it
+		  // behind that one and give up on it too. Say so instead; DrainPending notices
+		  // when the IDE has caught up and the next call goes through normally.
+		  If DrainPending > 0 Then
+		    LastErrorMessage = "The Xojo IDE is still executing an earlier request and has not answered it yet:" + _
+		    EndOfLine + PendingSummary + EndOfLine + _
+		    "No new request was sent. A build blocks the IDE until it finishes; wait for it, then try again."
+		    LogVerbose("IDE request refused: " + LastErrorMessage)
+		    Return Nil
+		  End If
+		  
 		  Var tag As String = NextTag
 
 		  // Build protocol upgrade + script request.
@@ -113,8 +127,7 @@ Protected Class IDECommunicator
 		    Var socketErrors() As String
 		    For Each candidatePath As String In CandidateSocketPaths
 		      LogVerbose("IDE request " + tag + ": IPCSocket path " + candidatePath + " (attempt " + attempt.ToString + ")")
-		      Var scriptWasSent As Boolean
-		      Var responseViaSocket As JSONItem = SendAndReceiveViaIPCSocket(candidatePath, payload, tag, timeoutMS, scriptWasSent)
+		      Var responseViaSocket As JSONItem = SendAndReceiveViaIPCSocket(candidatePath, payload, tag, timeoutMS, script)
 		      If responseViaSocket <> Nil Then
 		        mConnected = True
 		        mSocketPath = candidatePath
@@ -123,25 +136,24 @@ Protected Class IDECommunicator
 		        Return responseViaSocket
 		      End If
 
-		      If scriptWasSent Then
-		        // The IDE may already have received and be executing this
-		        // script; we just never saw a matching response. Resending
-		        // the same script (possibly to the same underlying socket
-		        // via a different candidate path) could execute it twice.
-		        // Surface this as a distinct, non-retryable failure instead.
-		        LastErrorMessage = "IDE script was sent via " + candidatePath + " but no response was received within " + _
-		        timeoutMS.ToString + "ms. The script may have already executed — not retrying to avoid duplicate execution. " + _
-		        "Original error: " + LastErrorMessage
-		        LogVerbose("IDE request " + tag + ": " + LastErrorMessage)
-		        Return Nil
-		      End If
-
 		      If LastErrorMessage <> "" Then
 		        LogVerbose("IDE request " + tag + ": IPCSocket failed (" + candidatePath + "): " + LastErrorMessage)
 		        socketErrors.Add(LastErrorMessage)
 		      End If
+		      
+		      // The request was delivered and is now parked: the IDE has it and will execute
+		      // it. Trying the remaining candidate paths - on macOS the same socket under
+		      // other names - would only knock on a busy IDE again and clutter the message
+		      // with "no listener" noise that is not the problem.
+		      If mParkedThisRequest Then Exit
 		    Next candidatePath
-
+		    
+		    If mParkedThisRequest Then
+		      mParkedThisRequest = False
+		      LastErrorMessage = String.FromArray(socketErrors, " | ")
+		      Exit While
+		    End If
+		    
 		    // All paths failed. If the socket was simply not found (IDE temporarily
 		    // closed it after a navigation), wait briefly and retry.
 		    Var allNotFound As Boolean = True
@@ -250,9 +262,8 @@ Protected Class IDECommunicator
 	#tag EndMethod
 	
 	#tag Method, Flags = &h21
-		Private Function SendAndReceiveViaIPCSocket(candidatePath As String, payload As String, tag As String, timeoutMS As Integer, ByRef scriptWasSent As Boolean) As JSONItem
+		Private Function SendAndReceiveViaIPCSocket(candidatePath As String, payload As String, tag As String, timeoutMS As Integer, script As String) As JSONItem
 		  LastErrorMessage = ""
-		  scriptWasSent = False
 
 		  #If Not TargetWindows Then
 		    // A Unix domain socket is a real filesystem entry, so a missing file means the
@@ -319,7 +330,6 @@ Protected Class IDECommunicator
 		  // as safe to blindly retry with the same script.
 		  Try
 		    sock.Write(payload)
-		    scriptWasSent = True
 		    sock.Flush
 		  Catch e As RuntimeException
 		    sock.Close
@@ -390,13 +400,23 @@ Protected Class IDECommunicator
 		    Return MergeReply(frames)
 		  End If
 		  
-		  sock.Close
-		  
 		  If hadData Then
+		    sock.Close
 		    LastErrorMessage = "Received IPC data from " + candidatePath + ", but no matching tag was found for " + tag + "."
-		  Else
-		    LastErrorMessage = "No IPCSocket response from " + candidatePath + " within " + timeoutMS.ToString + "ms."
+		    Return Nil
 		  End If
+		  
+		  // The IDE accepted the request - connect and write both succeeded - and has not
+		  // answered within the timeout. Do NOT close the socket. The IDE will answer when
+		  // it is done, and a write into a closed peer raises SIGPIPE, which the Xojo IDE
+		  // does not ignore: it dies mid-build, with no crash report. Park the socket open
+		  // instead; DrainPending releases it once the IDE has replied or has gone away.
+		  AddPending(sock, tag, script)
+		  mParkedThisRequest = True
+		  LastErrorMessage = "The Xojo IDE accepted the request but has not answered within " + timeoutMS.ToString + _
+		  "ms. It is most likely busy - a build, or a modal dialog waiting for a click - and it will finish " + _
+		  "the request regardless. The connection is kept open so the IDE can reply safely; that reply will " + _
+		  "be discarded. Further requests are refused until the IDE has answered."
 		  
 		  Return Nil
 		End Function
@@ -673,6 +693,100 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
+	#tag Method, Flags = &h21
+		Private Sub AddPending(sock As IPCSocket, tag As String, script As String)
+		  /// Parks a socket whose request the IDE accepted but has not answered yet.
+		  ///
+		  /// The IDE runs scripts on its main thread, so during a build - or behind a modal
+		  /// dialog - it answers nothing until it is done, and then answers everything that
+		  /// queued up, on the connections the requests arrived on. Closing such a
+		  /// connection is what killed the IDE: its later write hits a closed peer, the
+		  /// kernel raises SIGPIPE, and the Xojo IDE does not ignore that signal. The system
+		  /// log showed "exited due to SIGPIPE | sent by Xojo" five seconds after the build
+		  /// finished, with no crash report. So a timed-out socket stays open here until the
+		  /// IDE has replied or has gone away; DrainPending does the housekeeping.
+		  ///
+		  /// The crash is a macOS/Linux one: there the IPCSocket is a Unix domain socket. On
+		  /// Windows it is a TCP socket on localhost, where a write into a closed peer merely
+		  /// fails. Parking is still right there - a busy IDE accepts the connect into its
+		  /// backlog on both platforms, so the request is delivered either way, and refusing
+		  /// to stack more behind it is what keeps the message honest.
+		  
+		  mPendingSockets.Add(sock)
+		  mPendingTags.Add(tag)
+		  mPendingScripts.Add(script)
+		  mPendingSinceUS.Add(System.Microseconds)
+		End Sub
+	#tag EndMethod
+	#tag Method, Flags = &h0
+		Function DrainPending() As Integer
+		  /// Polls every parked socket and releases the ones the IDE is finished with: it
+		  /// wrote a reply (discarded - the caller gave up long ago), or it closed the
+		  /// connection (the IDE quit or crashed), or the socket has been parked longer
+		  /// than kPendingGiveUpMS. Returns how many are still waiting for the IDE.
+		  
+		  Var i As Integer = mPendingSockets.LastIndex
+		  While i >= 0
+		    Var sock As IPCSocket = mPendingSockets(i)
+		    Var done As Boolean = False
+		    Var reason As String = ""
+		    
+		    Try
+		      sock.Poll
+		      // The only thing the IDE ever writes on this connection is the reply, so any
+		      // byte at all means the request has been executed.
+		      If sock.ReadAll <> "" Then
+		        done = True
+		        reason = "the IDE answered it (reply discarded)"
+		      ElseIf Not sock.IsConnected Then
+		        done = True
+		        reason = "the IDE closed the connection"
+		      ElseIf System.Microseconds - mPendingSinceUS(i) > kPendingGiveUpMS * 1000.0 Then
+		        Var giveUpMinutes As Integer = kPendingGiveUpMS / 60000
+		        done = True
+		        reason = "it was parked for over " + giveUpMinutes.ToString + " minutes"
+		      End If
+		    Catch e As RuntimeException
+		      done = True
+		      reason = "polling it failed: " + e.Message
+		    End Try
+		    
+		    If done Then
+		      LogVerbose("IDE request " + mPendingTags(i) + ": released, " + reason + ".")
+		      Try
+		        sock.Close
+		      Catch e As RuntimeException
+		        // Nothing left to do with it.
+		      End Try
+		      mPendingSockets.RemoveAt(i)
+		      mPendingTags.RemoveAt(i)
+		      mPendingScripts.RemoveAt(i)
+		      mPendingSinceUS.RemoveAt(i)
+		    End If
+		    
+		    i = i - 1
+		  Wend
+		  
+		  Return mPendingSockets.Count
+		End Function
+	#tag EndMethod
+	#tag Method, Flags = &h0
+		Function PendingSummary() As String
+		  /// One line per parked request: its tag, how long ago it was sent, and the start
+		  /// of its script - enough to recognise "that was the build I started".
+		  
+		  Var lines() As String
+		  For i As Integer = 0 To mPendingSockets.LastIndex
+		    Var ageS As Integer = Floor((System.Microseconds - mPendingSinceUS(i)) / 1000000.0)
+		    Var preview As String = mPendingScripts(i).ReplaceLineEndings(" ").Trim
+		    If preview.Length > 80 Then preview = preview.Left(77) + "..."
+		    lines.Add("  " + mPendingTags(i) + " (sent " + ageS.ToString + "s ago): " + preview)
+		  Next i
+		  
+		  Return String.FromArray(lines, EndOfLine)
+		End Function
+	#tag EndMethod
+
 	#tag Property, Flags = &h0
 		LastErrorMessage As String
 	#tag EndProperty
@@ -690,6 +804,24 @@ Protected Class IDECommunicator
 	#tag EndProperty
 
 
+	#tag Property, Flags = &h21
+		Private mParkedThisRequest As Boolean
+	#tag EndProperty
+	#tag Property, Flags = &h21
+		Private mPendingScripts() As String
+	#tag EndProperty
+	#tag Property, Flags = &h21
+		Private mPendingSinceUS() As Double
+	#tag EndProperty
+	#tag Property, Flags = &h21
+		Private mPendingSockets() As IPCSocket
+	#tag EndProperty
+	#tag Property, Flags = &h21
+		Private mPendingTags() As String
+	#tag EndProperty
+	#tag Constant, Name = kPendingGiveUpMS, Type = Double, Dynamic = False, Default = \"7200000", Scope = Private, Description = 486F77206C6F6E672061207061726B656420736F636B65742069732068656C64206F70656E2077616974696E6720666F72207468652049444520746F20616E737765722C20696E206D696C6C697365636F6E647320283220686F757273292E
+	#tag EndConstant
+	
 	#tag Constant, Name = kConnectTimeoutMS, Type = Double, Dynamic = False, Default = \"1500", Scope = Private
 	#tag EndConstant
 	
