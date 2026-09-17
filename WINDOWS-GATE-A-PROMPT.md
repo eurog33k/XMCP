@@ -64,3 +64,23 @@ Then the Windows-specific ones, which are the whole point of this PR:
 
 Report results per numbered item, and say explicitly which ones you could not
 complete and why. Do not fix anything — this is a verification pass.
+
+---
+
+## Reporting back
+
+Results go to the `scratch/pr-workflow` branch, not into chat:
+
+1. Fill in the **win** column of `PR-TEST-CHECKLIST.md` (✅ / ❌ / ⬚).
+2. Append an entry to the top of `HANDOVER.md` naming the commit you tested,
+   what passed, what failed, and anything surprising.
+3. Commit and push:
+
+   ```
+   git add -f HANDOVER.md PR-TEST-CHECKLIST.md
+   git commit -m "windows: gate A results for e2053cf"
+   git push origin HEAD:scratch/pr-workflow
+   ```
+
+Do not push to `theme/windows-platform` — that is the PR branch and the macOS side
+owns it. If something needs fixing, describe it in `HANDOVER.md` and leave it.
