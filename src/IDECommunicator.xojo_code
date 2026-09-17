@@ -636,8 +636,8 @@ Protected Class IDECommunicator
 		  Return String.FromArray(lines, EndOfLine)
 		End Function
 	#tag EndMethod
-	#tag Method, Flags = &h0
-		Function MergeReply(frames() As JSONItem) As JSONItem
+	#tag Method, Flags = &h21
+		Private Function MergeReply(frames() As JSONItem) As JSONItem
 		  /// Folds the parts of one reply into a single envelope so callers keep reading
 		  /// response.Value("response") as before. The primary part is chosen by weight: an
 		  /// error beats output, output beats an empty answer, and a warning is primary only
@@ -703,8 +703,8 @@ Protected Class IDECommunicator
 		  mPendingSinceUS.Add(System.Microseconds)
 		End Sub
 	#tag EndMethod
-	#tag Method, Flags = &h0
-		Function DrainPending() As Integer
+	#tag Method, Flags = &h21
+		Private Function DrainPending() As Integer
 		  /// Polls every parked socket and releases the ones the IDE is finished with: it
 		  /// wrote a reply (discarded - the caller gave up long ago), or it closed the
 		  /// connection (the IDE quit or crashed), or the socket has been parked longer
@@ -755,8 +755,8 @@ Protected Class IDECommunicator
 		  Return mPendingSockets.Count
 		End Function
 	#tag EndMethod
-	#tag Method, Flags = &h0
-		Function PendingSummary() As String
+	#tag Method, Flags = &h21
+		Private Function PendingSummary() As String
 		  /// One line per parked request: its tag, how long ago it was sent, and the start
 		  /// of its script - enough to recognise "that was the build I started".
 		  
