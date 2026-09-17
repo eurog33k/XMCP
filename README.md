@@ -2,7 +2,19 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants direct control over the [Xojo IDE](https://www.xojo.com). Built in Xojo using [MCPKit](https://github.com/gkjpettet/MCPKit) by Garry Pettet.
 
-XMCP connects to the Xojo IDE via its IPC socket and exposes 31 tools that let an AI navigate projects, read and write code, build, run, analyze, and save projects, control debug sessions, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, search third-party Dash/Zeal `.docset` bundles, read debug logs and system output, estimate request cost, and generate or validate `.xojo_code`/`.xojo_window` file syntax directly on disk - all through the standard MCP protocol over stdin/stdout. Three more tools (`write_file`/`read_file`/`hash_file`) are available opt-in for MCP clients with no file tools of their own — see [below](#write_file-read_file-hash_file-opt-in).
+XMCP connects to the Xojo IDE via its IPC socket, all through the standard MCP protocol over stdin/stdout.
+
+## What XMCP can do
+
+34 tools in total (31 always on, 3 opt-in) across seven categories — see [Tools](#tools) below for the full reference on each one:
+
+- **IDE Tools** (19) — navigate, read/write code, build, run, save, analyze, control debug sessions, create items, inspect/modify item descriptions and constants, revert from disk, and run arbitrary IDE scripts
+- **Documentation Tools** (4) — search Xojo's bundled documentation and the user's personal notes, look up class references, list topics
+- **Docset Tools** (3) — search any third-party Dash/Zeal `.docset` bundle, independent of the Xojo-specific tools (works for any language with a docset)
+- **Debug Tools** (2) — read crash logs and system output
+- **Cost Awareness** (1) — estimate the likely token cost of a request before running it, with cheaper alternatives
+- **Disk-File Generation and Validation** (2) — generate or validate `.xojo_code`/`.xojo_window` `#tag` syntax directly on disk, no IDE required
+- **File Tools** (3, opt-in) — `write_file`/`read_file`/`hash_file`, for MCP clients with no file tools of their own (e.g. Claude Desktop)
 
 XMCP is built Xojo-first: the IDE tools, the bundled documentation search, and the `examples/` reference templates all exist because the author is a Xojo developer. But nothing in its architecture is Xojo-*only* — the documentation layer (see [Adapting XMCP to your stack](#adapting-xmcp-to-your-stack)) works for any language with a Dash/Zeal docset, and a project working in multiple languages can register several at once.
 
@@ -119,7 +131,7 @@ XMCP retries both standard socket paths on each IDE request, so tools begin work
 
 ## Tools
 
-XMCP exposes 31 MCP tools organized into seven categories, one of which (File Tools) is opt-in and adds 3 more.
+Full reference for every tool, organized into the same seven categories as [above](#what-xmcp-can-do).
 
 ### IDE Tools
 
