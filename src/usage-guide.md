@@ -20,7 +20,7 @@ This file is automatically loaded as an MCP resource when you connect to XMCP. I
 
 ## What XMCP can do
 
-XMCP gives you direct control over the Xojo IDE via 28 tools:
+XMCP gives you direct control over the Xojo IDE via 31 tools (34 with the opt-in file tools enabled):
 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
@@ -35,6 +35,22 @@ XMCP gives you direct control over the Xojo IDE via 28 tools:
 - **Third-party docsets**: `list_docsets`, `search_docset`, `get_docset_entry` (Dash/Zeal `.docset` bundles registered via `--docset-path`)
 - **Debugging**: `get_debug_log`, `get_system_log`
 - **Cost estimation**: `estimate_request_cost` — call this proactively before broad or documentation-heavy tasks to check whether the approach is likely to be expensive, and to get suggestions for cheaper alternatives
+
+### Optional file tools (opt-in)
+
+Three additional tools — `write_file`, `read_file`, and `hash_file` — provide direct filesystem access for MCP clients that lack built-in file tools (e.g. Claude Desktop). They are **disabled by default** and only registered when the server is started with `--enable-file-tools`, bringing the tool count to 34. If your MCP client already has its own file tools (e.g. Claude Code), leave these off — that's the point of the opt-in flag.
+
+When enabled, access is restricted to an allowlist of directories given via `--file-root` as comma-separated absolute paths (default: `/tmp`). Paths are lexically canonicalised (`.`/`..` segments resolved, duplicate slashes collapsed, macOS's symlinked `/tmp`, `/var`, `/etc` mapped to their `/private` equivalents), then resolved through `realpath(3)` and re-normalised before comparison, so a symlink inside an allowed root cannot be used to write outside it. Residual risk: the check and the subsequent file open are separate syscalls, so a symlink swapped in between the two would still escape — Xojo exposes no `openat`-style primitive to close that gap. Requests outside the allowed roots fail with an "Access denied" result.
+
+- `write_file` — write UTF-8 text to a file (whole-file replace); parent directory must exist. An optional `expected_hash` parameter (from `hash_file`) refuses the write if the file changed since you last read it, so a concurrent edit by the user or another agent is never silently discarded.
+- `read_file` — read UTF-8 text; `offset`/`length` are **character** offsets, so chunked reads never split a multibyte sequence. Returns content verbatim with no added header, so it's always safe to write straight back with `write_file`.
+- `hash_file` — MD5 or SHA-256 hex digest, streamed in 1 MB chunks (arbitrarily large files supported)
+
+Typical Claude Desktop configuration:
+
+```json
+"args": ["--enable-file-tools", "--file-root", "/tmp,/Users/you/GitHub"]
+```
 
 ---
 

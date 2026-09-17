@@ -2,7 +2,7 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants direct control over the [Xojo IDE](https://www.xojo.com). Built in Xojo using [MCPKit](https://github.com/gkjpettet/MCPKit) by Garry Pettet.
 
-XMCP connects to the Xojo IDE via its IPC socket and exposes 31 tools that let an AI navigate projects, read and write code, build, run, analyze, and save projects, control debug sessions, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, search third-party Dash/Zeal `.docset` bundles, read debug logs and system output, estimate request cost, and generate or validate `.xojo_code`/`.xojo_window` file syntax directly on disk - all through the standard MCP protocol over stdin/stdout.
+XMCP connects to the Xojo IDE via its IPC socket and exposes 31 tools that let an AI navigate projects, read and write code, build, run, analyze, and save projects, control debug sessions, create project items, inspect and modify item descriptions and constants, look up Xojo documentation, search third-party Dash/Zeal `.docset` bundles, read debug logs and system output, estimate request cost, and generate or validate `.xojo_code`/`.xojo_window` file syntax directly on disk - all through the standard MCP protocol over stdin/stdout. Three more tools (`write_file`/`read_file`/`hash_file`) are available opt-in for MCP clients with no file tools of their own — see [below](#write_file-read_file-hash_file-opt-in).
 
 XMCP is built Xojo-first: the IDE tools, the bundled documentation search, and the `examples/` reference templates all exist because the author is a Xojo developer. But nothing in its architecture is Xojo-*only* — the documentation layer (see [Adapting XMCP to your stack](#adapting-xmcp-to-your-stack)) works for any language with a Dash/Zeal docset, and a project working in multiple languages can register several at once.
 
@@ -84,6 +84,19 @@ To register one or more third-party `.docset` bundles (repeat the flag per bundl
 }
 ```
 
+To enable the opt-in file tools for a client with no file tools of its own (e.g. Claude Desktop):
+
+```json
+{
+  "mcpServers": {
+    "xmcp": {
+      "command": "/path/to/XMCP",
+      "args": ["--enable-file-tools", "--file-root", "/tmp,/Users/you/GitHub"]
+    }
+  }
+}
+```
+
 ## Usage
 
 ```
@@ -96,6 +109,8 @@ XMCP [options]
 | `-v`, `--verbose` | Enable verbose debug logging to stderr |
 | `-d`, `--docs-path PATH` | Path to Xojo documentation directory (auto-detected if omitted) |
 | `--docset-path PATH` | Path to a Dash/Zeal-style `.docset` bundle. Repeatable — pass once per bundle. |
+| `--enable-file-tools` | Enable the `write_file`/`read_file`/`hash_file` tools (disabled by default) |
+| `--file-root PATHS` | Comma-separated absolute paths the file tools may access (default: `/tmp`) |
 
 The server communicates via JSON-RPC over stdin/stdout following the MCP protocol. It is not meant to be run interactively - it is launched by an MCP client (like Claude Code, Codex CLI, or Claude Desktop).
 
@@ -104,7 +119,7 @@ XMCP retries both standard socket paths on each IDE request, so tools begin work
 
 ## Tools
 
-XMCP exposes 31 MCP tools organized into six categories.
+XMCP exposes 31 MCP tools organized into seven categories, one of which (File Tools) is opt-in and adds 3 more.
 
 ### IDE Tools
 
@@ -405,6 +420,27 @@ Validates a `.xojo_code` or `.xojo_window` file on disk for known structural err
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | String | Yes | Absolute path to the `.xojo_code` or `.xojo_window` file to validate. |
+
+### File Tools (opt-in)
+
+Direct filesystem access for MCP clients with no file tools of their own (e.g. Claude Desktop). **Disabled by default** — start XMCP with `--enable-file-tools` to register them, bringing the tool count to 34. Access is restricted to an allowlist of directories given via `--file-root` (comma-separated absolute paths, default `/tmp`); see [File tool sandbox](#file-tool-sandbox) below. If your MCP client already has file tools (Claude Code does), leave these off.
+
+#### `write_file`, `read_file`, `hash_file`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | String | Yes (all three) | Absolute path to the file. Must be inside an allowed file root. |
+| `content` | String | Yes (`write_file`) | Full text content to write; existing content is replaced entirely. |
+| `expected_hash` | String | No (`write_file`) | MD5 or SHA-256 hex digest the file is expected to have right now (from `hash_file`). The write is refused if the file changed since then, so a concurrent edit is never silently discarded. |
+| `offset` | Integer | No (`read_file`) | Character offset to start reading from. Default 0. |
+| `length` | Integer | No (`read_file`) | Maximum characters to read. Default 0 (whole file). |
+| `algorithm` | String | No (`hash_file`) | `md5` (default) or `sha256`. |
+
+`read_file` returns content verbatim, with no added header — always safe to write straight back with `write_file`. `hash_file` streams in 1 MB chunks, so file size is not limited by available memory.
+
+#### File tool sandbox
+
+`--file-root` paths are lexically canonicalised (`.`/`..` resolved, duplicate slashes collapsed, macOS's symlinked `/tmp`, `/var`, `/etc` mapped to `/private`), then resolved through `realpath(3)` before comparison, so a symlink inside an allowed root can't be used to escape it. This narrows but doesn't eliminate the risk: the access check and the file open are separate syscalls, so a symlink swapped in between the two would still escape — Xojo has no `openat`-style primitive to close that gap fully.
 
 ## Resources
 
