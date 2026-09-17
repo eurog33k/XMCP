@@ -39,9 +39,16 @@ Protected Module Platform
 		  /// order the IDE itself considers them. The first writable folder is the one
 		  /// the IDE picked, so callers should try it first.
 		  ///
-		  /// This mirrors FindIPCPath in Xojo's shipped IDECommunicator v2 example
-		  /// (Example Projects/.../IDE Scripting/IDECommunicator/v2), which is the
-		  /// reference implementation of the IDE's own path resolution.
+		  /// The chain is the one FindIPCPath uses in Xojo's shipped IDECommunicator v2
+		  /// example (Example Projects/.../IDE Scripting/IDECommunicator/v2), still
+		  /// unchanged as of 2026r2.1. Two deliberate differences from it:
+		  ///
+		  /// - The example stops at the first writable folder and returns that one path.
+		  ///   We collect every writable rung and hand back an ordered candidate list, so
+		  ///   an IDE that settled on a different rung than we would pick is still found.
+		  /// - The example returns ShellPath; we return NativePath. IPCSocket.Path wants a
+		  ///   real path, and ShellPath escapes it for a shell - a user folder containing a
+		  ///   space would be escaped into a path nothing is listening on.
 		  
 		  Var folders() As FolderItem
 		  
