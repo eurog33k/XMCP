@@ -235,19 +235,26 @@ Unix domain socket problem so the platform that matters is covered, but the logi
 runs on both.
 
 
-### Timeout coverage — read before ticking anything as "timeout verified"
+### Timeout coverage — verified on both platforms
 
-The configurable-timeout change is verified on **macOS only**, by a 335 s build of a
-large real project. Windows has *not* exercised it: the failing-build run there
-completed in **13 s**, because the plugin compilation was already cached from an
-earlier cold build. The same scenario had overrun 120 s when cold.
+The configurable-timeout change is verified against the condition it exists for, on
+both platforms, by builds that exceed the old hardcoded cap and return a real result:
 
-So on Windows what is proven is the *error reporting* and that the listener no longer
-dies — not that the new default rescues a long build. Reproducing that needs a cold
-Desktop build there, and nobody has forced one.
+| Platform | Project | Elapsed | Result |
+|---|---|---|---|
+| macOS | RBMainCrashFix (large, real) | **335 s** | `Build succeeded.` |
+| Windows | RBMain2025r31, Windows target only | **169 s** | `Build succeeded.` |
 
-Also unattributed: the passing Windows run both reverted first *and* carried the
-fixes. Either could account for the improvement over the run that killed the listener.
+Both would have timed out at the old 120 s cap and parked a socket for a build that
+was proceeding perfectly well. Neither came close to the new 1800 s default, so these
+runs establish only that 120 s is too low — they put no pressure on the ceiling.
+
+Getting here needed two corrections worth remembering. A fast-building project cannot
+test a timeout: XMCP itself builds in seconds, which is why macOS appeared unable to
+reproduce a "Windows" problem that was really a project-size problem. And an
+*incremental* build cannot test it either — the first Windows attempt finished in 13 s
+because plugin compilation was already cached, and a macOS target left enabled made an
+earlier run report a teardown artifact rather than the build's own outcome.
 
 ## PR 3 — XojoKit parser
 
