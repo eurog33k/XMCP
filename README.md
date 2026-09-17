@@ -515,7 +515,12 @@ For each IDE request, XMCP tries the last successful socket path first, then eve
 
 #### The transport underneath
 
-Candidates are derived by `Platform.IPCSocketPaths`, which mirrors `FindIPCPath` in Xojo's shipped IDECommunicator v2 example - the reference implementation of the IDE's own path resolution. It probes each candidate *folder* for writability, in the IDE's own order:
+The IDE builds its socket path by appending `XojoIDE` - or the value of `XOJO_IPCPATH` - to the first writable temporary directory it finds. Xojo documents that search as two rungs ([IDE Communicator](https://documentation.xojo.com/topics/build_automation/ide_communicator.html), expanded in 2026r2.1 for [issue #68115](https://tracker.xojo.com/xojoinc/xojo/-/work_items/68115)):
+
+1. `/tmp` - macOS and Linux only
+2. `SpecialFolder.Temporary` - all platforms; `C:\Users\<user>\AppData\Local\Temp\` on Windows
+
+`Platform.IPCSocketPaths` probes a slightly wider chain, mirroring `FindIPCPath` in Xojo's shipped IDECommunicator v2 example (the client Xojo ships for talking to its own IDE). The extra rungs cost nothing - a folder that is not writable is never added, and a candidate nothing listens on is ruled out by a short connect timeout:
 
 | Rung | macOS / Linux | Windows |
 |------|---------------|---------|
@@ -524,12 +529,16 @@ Candidates are derived by `Platform.IPCSocketPaths`, which mirrors `FindIPCPath`
 | 3 | `SpecialFolder.Temporary` | `%LOCALAPPDATA%\Temp` <- **in practice, this one** |
 | 4 | `SpecialFolder.Home` | `%USERPROFILE%` (follows OneDrive when active) |
 
-The socket file name is `XojoIDE`, or the value of the `XOJO_IPCPATH` environment variable when set - which is how you address one specific IDE when several are running. Xojo accepts a bare name there, not a path, and only `A-Z`, `a-z`, `0-9` and underscore.
+Rungs 1 and 3 are the documented ones; 2 and 4 come from the example client and rarely exist.
+
+The socket file name is `XojoIDE`, or the value of `XOJO_IPCPATH` when set - which is how you address one specific IDE when several are running. That value is a bare **name** appended to the temporary directory, not a path, and Xojo accepts only `a-z`, `A-Z`, `0-9` and underscore; anything else is ignored rather than passed through.
+
+> Set `XOJO_IPCPATH` in the environment that launches **XMCP**, not only the one that launches the IDE. XMCP reads it from its own process environment, so for Claude Code that means the MCP server entry, not your shell.
 
 Two platform differences matter:
 
 - **Windows endpoints have no filesystem entry**, because on Windows an `IPCSocket` is not a file at all but a TCP socket on `localhost` whose port is derived from the path string. `FolderItem.Exists` on the socket path is therefore always `False` there, even while the IDE is listening, so it must never gate the connect. XMCP keeps the existence check as a fast path on macOS and Linux only, and on Windows rules a candidate out with a short (1.5 s) connect timeout instead.
-- **The path is per-user.** `%LOCALAPPDATA%` differs between accounts, so XMCP must run as the same Windows user as the IDE. When no listener is found, the error message lists every path that was tried.
+- **The path is per-user.** `SpecialFolder.Temporary` resolves under the running account, so XMCP must run as the same Windows user as the IDE. When no listener is found, the error message lists every path that was tried.
 
 ### Documentation Auto-Detection
 
