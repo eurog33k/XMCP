@@ -71,29 +71,24 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Success("Project launched in debug mode.")
 		  End If
 
-		  If resultJSON.HasKey("buildError") Then
-		    Var buildError As JSONItem = resultJSON.Value("buildError")
-		    If buildError.HasKey("errors") Then
-		      Var errors As JSONItem = buildError.Value("errors")
-		      Var lines() As String
-		      Var i As Integer
-		      For i = 0 To errors.Count - 1
-		        Var err As JSONItem = errors.Value(i)
-		        Var errType As String = If(err.HasKey("type"), err.Value("type").StringValue, "Error")
-		        Var msg As String = If(err.HasKey("message"), err.Value("message").StringValue, "")
-		        Var location As String = If(err.HasKey("location"), err.Value("location").StringValue, "")
-		        Var position As String = If(err.HasKey("position"), err.Value("position").StringValue, "")
-		        Var line As String = errType + ": " + msg
-		        If location <> "" Then line = line + " [" + location + "]"
-		        If position <> "" And position <> location Then line = line + " (" + position + ")"
-		        lines.Add(line)
-		      Next i
-		      Return MCPKit.ToolResult.Failure("Build errors (" + errors.Count.ToString + "):" + EndOfLine + String.FromArray(lines, EndOfLine))
-		    End If
-		    Return MCPKit.ToolResult.Failure("Build failed: " + buildError.ToString)
+		  // buildError, missingFiles, openErrors, loadError - formatted by the shared
+		  // classifier in IDECommunicator so every tool reports them the same way.
+		  Var envelope As New JSONItem
+		  envelope.Value("response") = resultJSON
+		  Var diagnostics As String = App.IDE.ReplyDiagnostics(envelope)
+		  If diagnostics <> "" Then
+		    Var warnings As String = App.IDE.ReplyWarnings(envelope)
+		    If warnings <> "" Then diagnostics = diagnostics + EndOfLine + "Warnings:" + EndOfLine + warnings
+		    Return MCPKit.ToolResult.Failure(diagnostics)
 		  End If
 
-		  // Unknown JSON structure — return raw for debugging.
+		  // Warnings only: the debug build compiled and is running.
+		  Var warningsOnly As String = App.IDE.ReplyWarnings(envelope)
+		  If warningsOnly <> "" Then
+		    Return MCPKit.ToolResult.Success("Project launched in debug mode." + EndOfLine + "Warnings:" + EndOfLine + warningsOnly)
+		  End If
+
+		  // Unknown JSON structure: return raw for debugging.
 		  Return MCPKit.ToolResult.Failure("Run failed: " + resultJSON.ToString)
 
 		End Function
