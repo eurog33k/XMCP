@@ -6,7 +6,7 @@ This file is automatically loaded as an MCP resource when you connect to XMCP. I
 
 ## Prerequisites — before using any XMCP tools
 
-**XMCP cannot start Xojo IDE.** All tools communicate via a macOS domain socket (`/tmp/XojoIDE`) that Xojo IDE creates when it launches. If the IDE is not running, every tool call will fail with "IPC socket not found".
+**XMCP cannot start Xojo IDE.** All tools communicate via an IPC socket that Xojo IDE creates when it launches — a Unix domain socket at `/tmp/XojoIDE` on macOS and Linux, a TCP socket on `localhost` on Windows. If the IDE is not running, every tool call will fail with "IPC socket not found" (or, on Windows, a connect timeout naming the paths tried).
 
 **The user must:**
 
@@ -33,7 +33,7 @@ XMCP gives you direct control over the Xojo IDE via 31 tools (34 with the opt-in
 - **IDE scripting**: `run_ide_script` (escape hatch for anything not covered)
 - **Documentation**: `search_docs`, `lookup_class`, `list_doc_topics`
 - **Third-party docsets**: `list_docsets`, `search_docset`, `get_docset_entry` (Dash/Zeal `.docset` bundles registered via `--docset-path`)
-- **Debugging**: `get_debug_log`, `get_system_log`
+- **Debugging**: `get_debug_log`, `get_system_log` (macOS only — reads the unified log; not registered on other platforms)
 - **Cost estimation**: `estimate_request_cost` — call this proactively before broad or documentation-heavy tasks to check whether the approach is likely to be expensive, and to get suggestions for cheaper alternatives
 
 ### Optional file tools (opt-in)
@@ -527,7 +527,7 @@ When a debug session is active (started with `run_project`) and the app is pause
 | Scenario | Exceptions visible to XMCP? | Where to look |
 | --- | --- | --- |
 | `run_project` (debug mode) | No | User sees them in Xojo IDE debugger |
-| Built app with `UnhandledException` | Yes — via `get_debug_log` | `/tmp/xmcp_debug.log` |
+| Built app with `UnhandledException` | Yes — via `get_debug_log` | `/tmp/xmcp_debug.log` on macOS/Linux, `%TEMP%\xmcp_debug.log` on Windows |
 | Built app without `UnhandledException` | No | Nowhere — add the handler |
 
 ---
@@ -537,7 +537,7 @@ When a debug session is active (started with `run_project`) and the app is pause
 - Call `get_project_info` early to understand the project structure and get the directory path
 - Use `list_project_items` to explore the project tree before navigating
 - Use `run_ide_script` to run arbitrary IDE scripting commands when no dedicated tool exists
-- Use `get_system_log` to retrieve `System.DebugLog` output — works for both debug builds (`AppName.debug`) and built apps (`AppName`)
+- On macOS, use `get_system_log` to retrieve `System.DebugLog` output — works for both debug builds (`AppName.debug`) and built apps (`AppName`). Not available on other platforms — the tool is not registered there.
 
 ---
 
