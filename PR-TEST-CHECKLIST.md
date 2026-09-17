@@ -158,6 +158,14 @@ dropped it. Every "A2 clean" result for hours was measuring a broken checker. No
 automated step could catch this, because the tool under test *was* the check. Read
 the IDE's own Analyze output at least once per PR and confirm the two agree.
 
+
+**A long build is a test case, not an inconvenience.** The 120 s and 30 s hardcoded
+waits in `build_project` / `run_project` only fail on a project big enough to exceed
+them, and XMCP itself builds in seconds — so macOS could not reproduce the Windows
+timeout for hours. It turned out a large real project on the same Mac took **335 s**,
+nearly 3x the old cap. Keep a genuinely large project to hand for timeout work;
+"it passes here" against a fast-building project measures nothing.
+
 ## Gate A — every PR, both platforms
 
 | # | Check | mac | win |
