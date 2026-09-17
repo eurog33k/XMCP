@@ -12,7 +12,7 @@ Inherits MCPKit.ServerApplication
 		    If Verbose Then System.DebugLog("IDE communicator initialized.")
 		  Catch e As RuntimeException
 		    System.DebugLog("WARNING: Could not connect to Xojo IDE: " + e.Message)
-		    System.DebugLog("Make sure the Xojo IDE is running and the IPC socket is available at /tmp/XojoIDE or /private/tmp/XojoIDE.")
+		    System.DebugLog("Make sure the Xojo IDE is running and listening on one of: " + Platform.SocketPathSummary)
 		    IDE = Nil
 		  End Try
 		  
@@ -26,7 +26,7 @@ Inherits MCPKit.ServerApplication
 		      DocsPath = Nil
 		    End If
 		  Else
-		    // Auto-detect: scan ~/Library/Application Support/Xojo/Xojo/ for newest version.
+		    // Auto-detect: scan the platform's Xojo application-data folder for the newest version.
 		    DocsPath = DetectDocsPath
 		  End If
 		  
@@ -184,13 +184,16 @@ Inherits MCPKit.ServerApplication
 		    Print("  estimate_request_cost Estimate likely token cost and alternatives")
 		    Print("")
 		    Print("  Debug Tools:")
-		    Print("  get_debug_log        Read crash/exception log from /tmp/xmcp_debug.log")
-		    Print("  get_system_log       Read System.DebugLog output from macOS unified log")
+		    Print("  get_debug_log        Read crash/exception log from " + Platform.DebugLogPath)
+		    If Platform.SupportsSystemLog Then
+		      Print("  get_system_log       Read System.DebugLog output from macOS unified log")
+		    End If
 		    Print("")
 		    Print("Usage:")
 		    Print("  The XMCP server communicates via JSON-RPC over stdin/stdout (MCP protocol).")
-		    Print("  It connects to the Xojo IDE via the IPC socket at /tmp/XojoIDE (or /private/tmp/XojoIDE).")
-		    Print("  Documentation is auto-detected from ~/Library/Application Support/Xojo/")
+		    Print("  It connects to the Xojo IDE via an IPC socket. Candidate paths on this")
+		    Print("  platform: " + Platform.SocketPathSummary)
+		    Print("  Documentation is auto-detected from " + Platform.DocsRootPath)
 		    Print("  or can be specified with --docs-path.")
 		    Print("")
 		    Print("  Third-party Dash/Zeal .docset bundles can be registered with")
@@ -265,7 +268,9 @@ Inherits MCPKit.ServerApplication
 		  tools.Add(New RevertProject)
 		  tools.Add(New EstimateRequestCost)
 		  tools.Add(New GetDebugLog)
-		  tools.Add(New GetSystemLog)
+		  // get_system_log reads the macOS unified log; there is no equivalent
+		  // elsewhere, so it is not offered on other platforms.
+		  If Platform.SupportsSystemLog Then tools.Add(New GetSystemLog)
 		  tools.Add(New SaveProject)
 		  tools.Add(New AnalyzeProject)
 		  tools.Add(New DebugControl)
@@ -317,7 +322,9 @@ Inherits MCPKit.ServerApplication
 
 	#tag Method, Flags = &h21
 		Private Function DetectDocsPath() As FolderItem
-		  // Look for Xojo docs at ~/Library/Application Support/Xojo/Xojo/<version>/Documentation/
+		  // Look for Xojo docs under <application data>/Xojo/Xojo/<version>/Documentation/.
+		  // SpecialFolder.ApplicationData already resolves per platform: Application Support
+		  // on macOS, AppData\Roaming on Windows.
 		  Var appSupport As FolderItem = SpecialFolder.ApplicationData
 		  If appSupport = Nil Then Return Nil
 		  

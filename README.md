@@ -22,8 +22,8 @@ XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP re
 
 ## Requirements
 
-- **Xojo IDE** available for IDE tools (socket at `/tmp/XojoIDE` or `/private/tmp/XojoIDE`)
-- **macOS** (current implementation targets macOS paths for IDE socket discovery and documentation auto-detection)
+- **Xojo IDE** available for IDE tools (its IPC socket path is discovered automatically; see [IDE Communication](#ide-communication))
+- **macOS or Windows** - both are supported. On Windows the socket resolves under `%LOCALAPPDATA%\Temp` and `get_system_log` is unavailable (see [Known Limitations](#known-limitations)); Linux is untested
 - **Xojo documentation** (optional) - install via **Xojo IDE → Preferences → General → Install Local Documentation**, then auto-detected by XMCP
 
 ## Installation
@@ -502,7 +502,7 @@ XMCP
 
 ### IDE Communication
 
-XMCP connects to the Xojo IDE via a Unix domain socket (`IPCSocket`) at `/tmp/XojoIDE` (fallback: `/private/tmp/XojoIDE`). It uses the **IDE Communicator Protocol v2**, where messages are NUL-terminated JSON objects:
+XMCP connects to the Xojo IDE via an `IPCSocket` - a Unix domain socket on macOS and Linux, a TCP socket on `localhost` on Windows (see [The transport underneath](#the-transport-underneath)). It uses the **IDE Communicator Protocol v2**, where messages are NUL-terminated JSON objects:
 
 1. On connect, sends `{"protocol": 2}` to upgrade to protocol v2
 2. Requests are sent as `{"tag": "xmcp_1", "script": "Print Location"}`
@@ -511,15 +511,43 @@ XMCP connects to the Xojo IDE via a Unix domain socket (`IPCSocket`) at `/tmp/Xo
 
 The `IDECommunicator` class handles connection management, tag generation, synchronous send/receive with configurable timeouts, and NUL-terminated message framing using direct `IPCSocket` communication.
 
-For each IDE request, XMCP tries the last successful socket path first, then `/tmp/XojoIDE` and `/private/tmp/XojoIDE`. If all attempts fail, the tool returns a detailed connection/timeout error.
+For each IDE request, XMCP tries the last successful socket path first, then every candidate path for the platform. If all attempts fail, the tool returns a detailed connection/timeout error naming every path it tried.
+
+#### The transport underneath
+
+The IDE builds its socket path by appending `XojoIDE` - or the value of `XOJO_IPCPATH` - to the first writable temporary directory it finds. Xojo documents that search as two rungs ([IDE Communicator](https://documentation.xojo.com/topics/build_automation/ide_communicator.html), expanded in 2026r2.1 for [issue #68115](https://tracker.xojo.com/xojoinc/xojo/-/work_items/68115)):
+
+1. `/tmp` - macOS and Linux only
+2. `SpecialFolder.Temporary` - all platforms; `C:\Users\<user>\AppData\Local\Temp\` on Windows
+
+`Platform.IPCSocketPaths` probes a slightly wider chain, mirroring `FindIPCPath` in Xojo's shipped IDECommunicator v2 example (the client Xojo ships for talking to its own IDE). The extra rungs cost nothing - a folder that is not writable is never added, and a candidate nothing listens on is ruled out by a short connect timeout:
+
+| Rung | macOS / Linux | Windows |
+|------|---------------|---------|
+| 1 | `/tmp` | `C:\tmp` (rarely exists) |
+| 2 | `/var/tmp` | `C:\var\tmp` (rarely exists) |
+| 3 | `SpecialFolder.Temporary` | `%LOCALAPPDATA%\Temp` <- **in practice, this one** |
+| 4 | `SpecialFolder.Home` | `%USERPROFILE%` (follows OneDrive when active) |
+
+Rungs 1 and 3 are the documented ones; 2 and 4 come from the example client and rarely exist.
+
+The socket file name is `XojoIDE`, or the value of `XOJO_IPCPATH` when set - which is how you address one specific IDE when several are running. That value is a bare **name** appended to the temporary directory, not a path, and Xojo accepts only `a-z`, `A-Z`, `0-9` and underscore; anything else is ignored rather than passed through.
+
+> Set `XOJO_IPCPATH` in the environment that launches **XMCP**, not only the one that launches the IDE. XMCP reads it from its own process environment, so for Claude Code that means the MCP server entry, not your shell.
+
+Two platform differences matter:
+
+- **Windows endpoints have no filesystem entry**, because on Windows an `IPCSocket` is not a file at all but a TCP socket on `localhost` whose port is derived from the path string. `FolderItem.Exists` on the socket path is therefore always `False` there, even while the IDE is listening, so it must never gate the connect. XMCP keeps the existence check as a fast path on macOS and Linux only, and on Windows rules a candidate out with a short (1.5 s) connect timeout instead.
+- **The path is per-user.** `SpecialFolder.Temporary` resolves under the running account, so XMCP must run as the same Windows user as the IDE. When no listener is found, the error message lists every path that was tried.
 
 ### Documentation Auto-Detection
 
-On startup, XMCP scans `~/Library/Application Support/Xojo/Xojo/` for the newest Xojo version directory that contains `Documentation/llms-full.txt`. This file (along with `llms.txt` and `_sources/*.rst.txt`) is available via **Xojo IDE → Preferences → General → Install Local Documentation** and is intended specifically for LLM consumption.
+On startup, XMCP scans the platform's Xojo application-data folder (`~/Library/Application Support/Xojo/Xojo/` on macOS, `%APPDATA%\Xojo\Xojo\` on Windows) for the newest Xojo version directory that contains `Documentation/llms-full.txt`. This file (along with `llms.txt` and `_sources/*.rst.txt`) is available via **Xojo IDE → Preferences → General → Install Local Documentation** and is intended specifically for LLM consumption.
 
 ## Known Limitations
 
-- **macOS only** — depends on Unix domain sockets and macOS-specific Xojo docs location conventions.
+- **`get_system_log` is macOS-only** — it reads the macOS unified log, which has no equivalent elsewhere, so it is not registered on other platforms. Every other tool works on both macOS and Windows.
+- **Linux is untested** — the path resolution covers it, but nobody has run XMCP there.
 - **IDE tools require an open project** — the Xojo IDE scripting socket must be available and a project must be loaded.
 - **Documentation tools require local docs** — depend on `llms-full.txt`, `llms.txt`, and `_sources/*.rst.txt` files shipped with the Xojo IDE.
 - **Docset tools require registered bundles** — `list_docsets`, `search_docset`, and `get_docset_entry` return an error until at least one `--docset-path` is supplied; a docset shipped as a `tarix.tgz` archive is extracted to a local cache on first read, which can take a few seconds for a large bundle.
