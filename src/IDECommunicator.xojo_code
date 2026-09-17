@@ -313,17 +313,6 @@ Protected Class IDECommunicator
 		    Return Nil
 		  End If
 
-		  While Not sock.IsConnected And System.Microseconds < deadlineUS
-		    sock.Poll
-		    App.SleepCurrentThread(5)
-		  Wend
-
-		  If Not sock.IsConnected Then
-		    sock.Close
-		    LastErrorMessage = "IPCSocket connect timeout for " + candidatePath + " within " + timeoutMS.ToString + "ms."
-		    Return Nil
-		  End If
-
 		  // Once Write succeeds, the IDE may have already received (and be
 		  // executing) the script even if we never see a response — e.g. a
 		  // timeout below. From this point on, a failure must NOT be treated
