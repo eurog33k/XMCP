@@ -67,6 +67,32 @@ complete and why. Do not fix anything — this is a verification pass.
 
 ---
 
+## Shell notes
+
+Run Claude Code from **Windows Terminal**; legacy conhost renders the TUI badly.
+PowerShell is the better host shell here, mainly because tests 9 and 10 need an
+environment variable set for a launched process.
+
+```cmd
+set XOJO_IPCPATH=XojoTest2 && "C:\Program Files\Xojo\Xojo 2026r1.1\Xojo.exe"
+```
+```powershell
+$env:XOJO_IPCPATH = "XojoTest2"; & "C:\Program Files\Xojo\Xojo 2026r1.1\Xojo.exe"
+```
+
+The variable must reach **the process that launches XMCP**, not only the IDE - for
+Claude Code that means the MCP server entry or the environment Claude Code itself
+was started in, not a variable set afterwards in a shell.
+
+Two things to establish in the first minute, and report:
+
+- Which shell Claude's own command tool actually uses (it is usually Git Bash on
+  Windows, not cmd or PowerShell). Run something trivial like `uname -s || ver`
+  and say what answered. It decides whether the bash commands in
+  `PR-TEST-CHECKLIST.md` work as written.
+- Whether Python is `python`, `python3` or `py -3`, since `probe-handshake.py`
+  needs it.
+
 ## Reporting back
 
 Results go to the `scratch/pr-workflow` branch, not into chat:
