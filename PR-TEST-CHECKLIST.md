@@ -125,28 +125,28 @@ are linting and reading a different byte stream there, which is precisely where 
 
 | # | Check | mac | win |
 |---|-------|-----|-----|
-| A1 | `lint_project_file` clean on every edited `.xojo_code` / `.xojo_window` | ✅ | ☐ |
-| A2 | `analyze_project` (full project scope) — no errors, no new warnings | ✅ | ☐ |
-| A3 | `build_project` succeeds for **the target you ship**. On macOS pass `build_type: 24` or `16`; omitting it resolves to Universal, which the Xojo bug always corrupts, so A3-with-no-target cannot pass on macOS and measures Xojo rather than the PR. On Windows, omit it | ✅ | ☐ |
-| A4 | **Built file is actually an executable** — `file` reports Mach-O / PE32+, not text. **macOS Universal only**: a `CopyFilesBuildStep` overwrites the binary with `usage-guide.md` and still reports success. macOS 64 bit and ARM 64 are both correct. Check `file` on the target you actually ship | ✅ | ☐ |
-| A5 | Binary starts — `probe-handshake.py` returns `serverInfo`. (Do not pipe into it by hand; it does not exit on stdin EOF) | ✅ | ☐ |
-| A6 | `get_project_info` round-trips to the live IDE through the built binary (`--call` on the probe) | ✅ | ☐ |
-| A7 | macOS only, and **only when deploying to a bundle-shaped folder** such as `/Applications/XMCP`: re-sign after copying anything in, then `codesign -v` exits 0. N/A for a single-architecture build, whose signature is embedded in the Mach-O and seals only that file | ⬚ | ⬚ |
-| A8 | Diff contains nothing from a later theme (grep the diff for the other PRs' symbols) | ✅ | ☐ |
-| A9 | Upstream's version of every file we did not deliberately change is intact — `git diff upstream/main` reviewed hunk by hunk | ☐ | ☐ |
+| A1 | `lint_project_file` clean on every edited `.xojo_code` / `.xojo_window` | ✅ |  ✅ |
+| A2 | `analyze_project` (full project scope) — no errors, no new warnings | ✅ |  ✅ |
+| A3 | `build_project` succeeds for **the target you ship**. On macOS pass `build_type: 24` or `16`; omitting it resolves to Universal, which the Xojo bug always corrupts, so A3-with-no-target cannot pass on macOS and measures Xojo rather than the PR. On Windows, omit it | ✅ |  ✅ |
+| A4 | **Built file is actually an executable** — `file` reports Mach-O / PE32+, not text. **macOS Universal only**: a `CopyFilesBuildStep` overwrites the binary with `usage-guide.md` and still reports success. macOS 64 bit and ARM 64 are both correct. Check `file` on the target you actually ship | ✅ |  ✅ |
+| A5 | Binary starts — `probe-handshake.py` returns `serverInfo`. (Do not pipe into it by hand; it does not exit on stdin EOF) | ✅ |  ✅ |
+| A6 | `get_project_info` round-trips to the live IDE through the built binary (`--call` on the probe) | ✅ |  ✅ |
+| A7 | macOS only, and **only when deploying to a bundle-shaped folder** such as `/Applications/XMCP`: re-sign after copying anything in, then `codesign -v` exits 0. N/A for a single-architecture build, whose signature is embedded in the Mach-O and seals only that file | ⬚ |  ⬚ |
+| A8 | Diff contains nothing from a later theme (grep the diff for the other PRs' symbols) | ✅ |  ✅ |
+| A9 | Upstream's version of every file we did not deliberately change is intact — `git diff upstream/main` reviewed hunk by hunk | ☐ |  ⬚ |
 
 ## PR 1 — Platform + Windows IPC socket
 
 | # | Check | mac | win |
 |---|-------|-----|-----|
-| 1.1 | IDE open: socket found, tools answer | ✅ | ☐ |
-| 1.2 | IDE closed: error names **every** path tried, no hang | ☐ | ☐ |
-| 1.3 | Windows: resolved path is under `%LOCALAPPDATA%\Temp`, and XMCP runs as the same user as the IDE | n/a | ☐ |
-| 1.4 | `XOJO_IPCPATH=Xojo2026r1` with a second IDE — each session reaches its own IDE | ☐ | ☐ |
-| 1.5 | `XOJO_IPCPATH=/some/path` (invalid per Xojo docs) is ignored, falls back to `XojoIDE` — **behaviour change from upstream on macOS**, confirm it breaks nobody | ☐ | ☐ |
-| 1.6 | A long build does not stall: wrong candidates rule out in ~1.5 s each, not the full 120 s | ☐ | ☐ |
-| 1.7 | `get_system_log` present on macOS, absent on Windows; `--help` tool count differs by exactly one | ☐ | ☐ |
-| 1.8 | `get_debug_log` reads `/tmp/xmcp_debug.log` on macOS, `%TEMP%\xmcp_debug.log` on Windows; missing file returns a message, not a crash | ☐ | ☐ |
+| 1.1 | IDE open: socket found, tools answer | ✅ | ✅ |
+| 1.2 | IDE closed: error names **every** path tried, no hang | ✅ | ✅ |
+| 1.3 | Windows: resolved path is under `%LOCALAPPDATA%\Temp`, and XMCP runs as the same user as the IDE | ✅ | ✅ |
+| 1.4 | `XOJO_IPCPATH=Xojo2026r1` with a second IDE — each session reaches its own IDE | ✅ | ✅ |
+| 1.5 | `XOJO_IPCPATH=/some/path` (invalid per Xojo docs) is ignored, falls back to `XojoIDE` — **behaviour change from upstream on macOS**, confirm it breaks nobody | ✅ | ✅ |
+| 1.6 | A long build does not stall: wrong candidates rule out in ~1.5 s each, not the full 120 s | ✅ | ✅ |
+| 1.7 | `get_system_log` present on macOS, absent on Windows; `--help` tool count differs by exactly one | ✅ | ✅ |
+| 1.8 | `get_debug_log` reads `/tmp/xmcp_debug.log` on macOS, `%TEMP%\xmcp_debug.log` on Windows; missing file returns a message, not a crash | ✅ | ✅ |
 
 ## PR 2 — IDE connection handling
 
@@ -245,3 +245,47 @@ issue is understood.
 Upstream accepted a value containing `/` as an absolute path; we ignore anything
 outside `[A-Za-z0-9_]`. Xojo's docs back us (2026r2.1, issue 68115), but an existing
 user relying on the old behaviour would silently stop connecting.
+
+---
+
+## PR 1 — VERIFIED ON BOTH PLATFORMS, 2026-09-17
+
+Commit under test: **`e2053cf`**, `theme/windows-platform`, 4 commits off `upstream/main`.
+Windows: fresh clone at `C:\XMCP-src`, Xojo 2026r2.1, built `Windows 64 bit`.
+macOS: Xojo 2026r2.1, built `macOS ARM 64 bit`.
+
+Everything passes. Findings that came out of the run, none of them blocking:
+
+1. **Windows builds no `usage-guide.md`.** Upstream's `Build Automation` has copy
+   steps only in the **Mac OS X** build step list; the Windows list is just
+   `BuildProjectStep`. So the guide has always needed a manual copy there, as the
+   README says. Not a regression, but it means the MCP resource is absent unless
+   someone remembers.
+2. **Failure time is multiplicative.** With no IDE listening, a tool call fails in
+   ~11.5s: 5 attempts x 1.5s connect timeout + 4 x 1s retry pauses. Fine on this
+   machine, which resolves exactly **one** candidate - but four writable candidates
+   would make it ~34s. Argues for either trimming the chain to the two documented
+   rungs, or not retrying a connect *timeout* as hard as a missing socket file.
+   Worth raising with Ojvind rather than deciding quietly.
+3. **`analyze_project` is not comparable across machines.** Same commit: macOS
+   reported no warnings, Windows reported two (`ServerApplication.HandleInitialize`,
+   `ListDocsets.Run` - both upstream code, both signature-mandated parameters).
+   Per-install analyzer settings differ, so A2 means "no *new* warnings against that
+   machine's baseline", never a number to compare.
+4. **A9 is not per-platform after all.** `git diff` shows LF-normalised repository
+   content, not the working tree, so the Windows read would be byte-identical to the
+   macOS one. The CRLF justification holds for A1 (the linter reads the working tree)
+   but not for A9. Marked n/a rather than run twice.
+5. **The Windows install could not verify itself.** `C:\XMCP\XMCP.exe` is build
+   1.3.0.66 with 25 tools and has neither `lint_project_file` nor `analyze_project`.
+   The branch build was registered as a second MCP server (`xmcp-pr1`, 30 tools)
+   rather than overwriting it, which also tested the new binary as a real server.
+6. Cosmetic, out of PR 1's scope: `--help` still prints `"command": "/path/to/XMCP"`,
+   a POSIX path, on Windows. Our `windows-support` branch prints the real executable
+   path with escaped backslashes. Belongs in a later PR.
+
+Key confirmations: the Universal build corruption is **macOS-only** - Windows
+produced a correct 7,168,512-byte PE with the copy step absent entirely. The
+`#If TargetWindows` branches compiled for the first time here and were clean.
+`XOJO_IPCPATH` was tested both ways: a valid name reached a dedicated IDE, and
+clearing it made that same IDE unreachable, so the first result was not a false pass.
