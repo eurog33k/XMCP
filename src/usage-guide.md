@@ -427,7 +427,7 @@ The IDE scripting assignment `ConstantValue(name) = value` never raises an error
 ### Documentation tools — use search_docs and lookup_class, not list_doc_topics
 
 - `search_docs` — search guides and tutorials by natural-language query. Use this first for any conceptual or how-to question.
-- `lookup_class` — look up a specific class or method in the API reference.
+- `lookup_class` — look up a specific class or method in the API reference. Defaults to a summary (description + member table); pass `member` for one member's full entry, or `full=true` for the complete unabridged page (large - avoid unless you need it).
 - `list_doc_topics` — returns the full documentation index (143,000+ characters). **Never call this to find information** — it wastes tokens and requires multiple slow read passes. Use `search_docs` instead. Only call `list_doc_topics` if the user explicitly asks for a topic overview.
 
 ### Third-party docsets — list_docsets, search_docset, get_docset_entry

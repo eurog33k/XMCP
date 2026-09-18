@@ -125,6 +125,15 @@ Inherits MCPKit.Tool
 		      Var lastLine As Integer = lines.LastIndex
 		      If wanted < anchorAt.LastIndex Then
 		        lastLine = anchorAt(wanted + 1) - 1
+		      Else
+		        // The last member on the page has no next anchor to stop at, so
+		        // without this the entry runs on into the page's trailing matter
+		        // (Notes, Sample code, Compatibility, .. seealso::) which isn't
+		        // part of any member and isn't anchored the way members are.
+		        Var trailingHeading As Integer = NextHeadingAt(lines, anchorAt(wanted) + 1)
+		        If trailingHeading <> -1 Then
+		          lastLine = trailingHeading - 1
+		        End If
 		      End If
 
 		      // The label line and the transition rule under it delimit the entry;
@@ -273,7 +282,7 @@ Inherits MCPKit.Tool
 		    Var t As String = line.Trim
 
 		    If t.BeginsWith(".. rst-class::") Or t.BeginsWith(".. csv-table::") _
-		      Or t.BeginsWith(".. code::") Or t.BeginsWith(":header:") Or t.BeginsWith(":widths:") Then
+		      Or t.BeginsWith(".. code::") Or t.BeginsWith(":header:") Or t.BeginsWith(":header-rows:") Or t.BeginsWith(":widths:") Then
 		      Continue
 		    End If
 
@@ -311,6 +320,28 @@ Inherits MCPKit.Tool
 		  Next i
 
 		  Return True
+
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function NextHeadingAt(lines() As String, startLine As Integer) As Integer
+			/// Finds the next top-level RST heading at or after startLine: a
+			/// non-blank, non-directive text line immediately followed (no blank
+			/// line between) by an IsRule() underline. That adjacency is what
+			/// distinguishes a real heading from a standalone transition rule
+			/// (e.g. the "----" under a member's anchor label), which RST always
+			/// surrounds with blank lines instead. Returns -1 if none is found.
+
+			For i As Integer = startLine To lines.LastIndex - 1
+			  Var t As String = lines(i).Trim
+			  If t = "" Or t.BeginsWith(".. ") Or t.BeginsWith(":") Then Continue
+			  If IsRule(lines(i + 1).Trim) Then
+			    Return i
+			  End If
+			Next i
+
+			Return -1
 
 		End Function
 	#tag EndMethod

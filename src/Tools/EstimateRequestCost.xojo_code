@@ -69,9 +69,9 @@ Inherits MCPKit.Tool
 		      alternatives.Add("Use `list_doc_topics` with a narrow `filter` value.")
 		    End If
 		    If planned.IndexOf("lookup_class") >= 0 Then
-		      score = score + 2
-		      reasons.Add("`lookup_class` returns full reference pages.")
-		      alternatives.Add("Use `search_docs` first to narrow class names.")
+		      score = score + 1
+		      reasons.Add("`lookup_class` defaults to a scoped summary; full=true returns the complete reference page.")
+		      alternatives.Add("Avoid full=true unless the complete page is needed - the default summary or a single member is usually enough.")
 		    End If
 		    If planned.IndexOf("search_docs") >= 0 Then
 		      score = score + 2
