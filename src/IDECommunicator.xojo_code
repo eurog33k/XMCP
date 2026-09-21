@@ -110,9 +110,27 @@ Protected Class IDECommunicator
 		  Var proto As New JSONItem
 		  proto.Value("protocol") = 2
 
+		  // Every request must be answerable. The IDE answers once per Print and not at all
+		  // without one, so a script that prints nothing is never replied to: the request
+		  // times out, its socket is parked, and because the IDE serves one IPC connection at
+		  // a time that blocks every other client until the give-up timer expires. Appending
+		  // the sentinel here rather than in each tool means a tool cannot forget, and a
+		  // caller-supplied script - run_ide_script, or anything through RunScript - cannot
+		  // reintroduce it. MergeReply ranks real output above an empty reply, so a script
+		  // that does print still reports its own output.
+		  //
+		  // Skipped when the script ends in a line continuation: the sentinel would be absorbed
+		  // into that line and change its meaning. Such a script does not compile, and a
+		  // compile error is itself a reply, so it cannot park either way.
+		  Var sent As String = script
+		  Var tail As String = script.Trim
+		  If tail <> "" And tail.Right(1) <> "_" Then
+		    sent = script + EndOfLine + "Print """""
+		  End If
+		  
 		  Var req As New JSONItem
 		  req.Value("tag") = tag
-		  req.Value("script") = script
+		  req.Value("script") = sent
 
 		  Var payload As String = proto.ToString + Chr(0) + req.ToString + Chr(0)
 		  LogVerbose("IDE request " + tag + ": trying IPCSocket transport.")
@@ -341,13 +359,17 @@ Protected Class IDECommunicator
 		  Var hadData As Boolean = False
 		  
 		  // One reply can arrive as several messages under the same tag: a script's Print
-		  // output and a compiler warning about it land about a millisecond apart, and an
-		  // analysis returns its buildError and the Print sentinel together. Returning on
-		  // the first frame made the answer whichever part won the race. After the first
-		  // matching frame the loop keeps reading for a short window and MergeReply folds
-		  // the parts. When the first part is only a warning the real output is still
-		  // coming and may take as long as the script itself, so that wait is longer and
-		  // ends as soon as any further part arrives.
+		  // output and a compiler warning about it arrive together, and an analysis returns
+		  // its buildError and the Print sentinel together. Returning on the first frame made
+		  // the answer whichever part won the race. After the first matching frame the loop
+		  // keeps reading for a short window and MergeReply folds the parts.
+		  //
+		  // A warning gets no special window. An earlier version waited far longer when the
+		  // first frame was a warning, on the assumption that the output was still to come -
+		  // an assumption we could not reproduce: measured against the IDE socket on 2025r3.1
+		  // and 2026r2.1, the warning always arrived with the output, never ahead of it. If a
+		  // reply ever does turn out to be warnings-only, the socket is parked rather than
+		  // answered (see below), so the late output still lands safely.
 		  Var frames() As JSONItem
 		  Var collectUntilUS As Double = deadlineUS
 		  
@@ -376,14 +398,7 @@ Protected Class IDECommunicator
 		        If response.HasKey("tag") And response.Value("tag").StringValue = tag Then
 		          frames.Add(response)
 		          If frames.Count = 1 Then
-		            If ReplyKind(response) = "warning" Then
-		              collectUntilUS = System.Microseconds + (kSplitWaitForOutputMS * 1000.0)
-		            Else
-		              collectUntilUS = System.Microseconds + (kSplitReplyWindowMS * 1000.0)
-		            End If
-		          ElseIf ReplyKind(frames(0)) = "warning" Then
-		            // The output the warning was holding up has arrived; nothing else is coming.
-		            collectUntilUS = System.Microseconds
+		            collectUntilUS = System.Microseconds + (kSplitReplyWindowMS * 1000.0)
 		          End If
 		        Else
 		          LogVerbose("IDE request " + tag + ": ignoring a frame for another tag (stale or unsolicited).")
@@ -394,13 +409,26 @@ Protected Class IDECommunicator
 		    Wend
 		  Wend
 		  
-		  If frames.Count > 0 Then
+		  // Warnings and nothing else means the script is still running: every caller sends
+		  // a script that ends in a Print, so an output frame is always coming eventually.
+		  // Answering with the warning here would pick the wrong part AND close the socket
+		  // on a reply still in flight - the two failures this class exists to avoid. Fall
+		  // through to parking instead.
+		  Var onlyWarnings As Boolean = frames.Count > 0
+		  For Each f As JSONItem In frames
+		    If ReplyKind(f) <> "warning" Then
+		      onlyWarnings = False
+		      Exit
+		    End If
+		  Next f
+		  
+		  If frames.Count > 0 And Not onlyWarnings Then
 		    sock.Close
 		    LastErrorMessage = ""
 		    Return MergeReply(frames)
 		  End If
 		  
-		  If hadData Then
+		  If hadData And frames.Count = 0 Then
 		    sock.Close
 		    LastErrorMessage = "Received IPC data from " + candidatePath + ", but no matching tag was found for " + tag + "."
 		    Return Nil
@@ -814,9 +842,6 @@ Protected Class IDECommunicator
 	#tag EndConstant
 	
 	#tag Constant, Name = kSplitReplyWindowMS, Type = Double, Dynamic = False, Default = \"250", Scope = Private, Description = 486F77206C6F6E6720746F206B6565702072656164696E6720666F72206D6F726520706172747320616674657220746865206669727374206D61746368696E67207265706C79206672616D652C20696E206D696C6C697365636F6E64732E
-	#tag EndConstant
-	
-	#tag Constant, Name = kSplitWaitForOutputMS, Type = Double, Dynamic = False, Default = \"30000", Scope = Private, Description = 486F77206C6F6E6720746F207761697420666F7220746865207363726970742773207265616C206F7574707574207768656E206F6E6C79206120636F6D70696C6572207761726E696E6720686173206172726976656420736F206661722C20696E206D696C6C697365636F6E64732E
 	#tag EndConstant
 	
 	#tag ViewBehavior
