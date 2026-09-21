@@ -524,7 +524,9 @@ A single request can be answered by **several messages under the same tag**. Mea
 
 A script's output and a compiler warning about that script land about a millisecond apart, and an analysis answers with its `buildError` and the `Print` sentinel together. Returning on the first matching frame made the answer whichever part won the race - which is why a successful script sometimes reported only a warning.
 
-XMCP keeps reading for a short window (250 ms) after the first matching frame and merges the parts. An error part is the answer; otherwise the output is; a warning is the answer only when it is all there is. The other parts stay attached, which is how a tool reports the warning that *accompanied* a successful script rather than one or the other. When the first part is only a warning the real output has not been sent yet and may take as long as the script itself, so that wait is much longer and ends the moment any further part arrives.
+XMCP keeps reading for a short window (250 ms) after the first matching frame and merges the parts. An error part is the answer, otherwise the output is. The other parts stay attached, which is how a tool reports the warning that *accompanied* a successful script rather than one or the other.
+
+A reply carrying nothing but warnings is not answered at all - its socket is parked instead, on the basis that the output is still to come. That case has not been observed: measured against the IDE socket on 2025r3.1 and 2026r2.1, a compiler warning always arrived together with the output, never ahead of it.
 
 Because a script with no `Print` never answers, `run_ide_script` appends one before sending. Without it the request times out, its socket is parked as though the IDE were busy, and every later request is refused until the give-up timer expires - one `Print`-less script would block the session.
 

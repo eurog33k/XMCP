@@ -37,18 +37,7 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
 		  End If
 		  
-		  // A script that prints nothing gets no reply at all - measured against the IDE
-		  // socket directly: "Print" once yields one frame, twice yields two, and a script
-		  // with no Print yields none. Without a reply the request times out and its socket
-		  // is parked as though the IDE were busy, which then refuses every later request
-		  // until the give-up timer expires - one Print-less script would block the session.
-		  //
-		  // So append one. The IDE sends a frame per Print rather than only the first, and
-		  // MergeReply ranks real output above an empty answer, so a script that does print
-		  // still reports its own output; one that does not now answers instead of hanging.
-		  Var sent As String = script + EndOfLine + "Print """""
-		  
-		  Var response As JSONItem = App.IDE.SendAndReceive(sent, timeoutMS)
+		  Var response As JSONItem = App.IDE.SendAndReceive(script, timeoutMS)
 		  If response = Nil Then
 		    If App.IDE.LastErrorMessage <> "" Then
 		      Return MCPKit.ToolResult.Failure(App.IDE.LastErrorMessage)
