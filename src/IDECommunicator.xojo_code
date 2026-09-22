@@ -725,10 +725,7 @@ Protected Class IDECommunicator
 		  /// backlog on both platforms, so the request is delivered either way, and refusing
 		  /// to stack more behind it is what keeps the message honest.
 		  
-		  mPendingSockets.Add(sock)
-		  mPendingTags.Add(tag)
-		  mPendingScripts.Add(script)
-		  mPendingSinceUS.Add(System.Microseconds)
+		  mPending.Add(New PendingRequest(sock, tag, script))
 		End Sub
 	#tag EndMethod
 	#tag Method, Flags = &h0
@@ -738,23 +735,26 @@ Protected Class IDECommunicator
 		  /// connection (the IDE quit or crashed), or the socket has been parked longer
 		  /// than kPendingGiveUpMS. Returns how many are still waiting for the IDE.
 		  
-		  Var i As Integer = mPendingSockets.LastIndex
+		  Var i As Integer = mPending.LastIndex
 		  While i >= 0
-		    Var sock As IPCSocket = mPendingSockets(i)
+		    Var req As PendingRequest = mPending(i)
 		    Var done As Boolean = False
 		    Var reason As String = ""
 		    
 		    Try
-		      sock.Poll
-		      // The only thing the IDE ever writes on this connection is the reply, so any
-		      // byte at all means the request has been executed.
-		      If sock.ReadAll <> "" Then
+		      req.Sock.Poll
+		      // A reply is whole only once its NUL terminator arrives. Releasing on the first
+		      // byte would close the socket on a reply still being written, which is the
+		      // SIGPIPE this whole mechanism exists to avoid - and on Windows the transport is
+		      // TCP, where a large reply is split across segments as a matter of course.
+		      If req.ReplyComplete Then
 		        done = True
 		        reason = "the IDE answered it (reply discarded)"
-		      ElseIf Not sock.IsConnected Then
+		      ElseIf Not req.Sock.IsConnected Then
+		        // Nothing more is coming, whether or not what arrived was whole.
 		        done = True
 		        reason = "the IDE closed the connection"
-		      ElseIf System.Microseconds - mPendingSinceUS(i) > kPendingGiveUpMS * 1000.0 Then
+		      ElseIf System.Microseconds - req.SinceUS > kPendingGiveUpMS * 1000.0 Then
 		        Var giveUpMinutes As Integer = kPendingGiveUpMS / 60000
 		        done = True
 		        reason = "it was parked for over " + giveUpMinutes.ToString + " minutes"
@@ -765,22 +765,19 @@ Protected Class IDECommunicator
 		    End Try
 		    
 		    If done Then
-		      LogVerbose("IDE request " + mPendingTags(i) + ": released, " + reason + ".")
+		      LogVerbose("IDE request " + req.Tag + ": released, " + reason + ".")
 		      Try
-		        sock.Close
+		        req.Sock.Close
 		      Catch e As RuntimeException
 		        // Nothing left to do with it.
 		      End Try
-		      mPendingSockets.RemoveAt(i)
-		      mPendingTags.RemoveAt(i)
-		      mPendingScripts.RemoveAt(i)
-		      mPendingSinceUS.RemoveAt(i)
+		      mPending.RemoveAt(i)
 		    End If
 		    
 		    i = i - 1
 		  Wend
 		  
-		  Return mPendingSockets.Count
+		  Return mPending.Count
 		End Function
 	#tag EndMethod
 	#tag Method, Flags = &h21
@@ -789,12 +786,12 @@ Protected Class IDECommunicator
 		  /// of its script - enough to recognise "that was the build I started".
 		  
 		  Var lines() As String
-		  For i As Integer = 0 To mPendingSockets.LastIndex
-		    Var ageS As Integer = Floor((System.Microseconds - mPendingSinceUS(i)) / 1000000.0)
-		    Var preview As String = mPendingScripts(i).ReplaceLineEndings(" ").Trim
+		  For Each req As PendingRequest In mPending
+		    Var ageS As Integer = Floor((System.Microseconds - req.SinceUS) / 1000000.0)
+		    Var preview As String = req.Script.ReplaceLineEndings(" ").Trim
 		    If preview.Length > 80 Then preview = preview.Left(77) + "..."
-		    lines.Add("  " + mPendingTags(i) + " (sent " + ageS.ToString + "s ago): " + preview)
-		  Next i
+		    lines.Add("  " + req.Tag + " (sent " + ageS.ToString + "s ago): " + preview)
+		  Next req
 		  
 		  Return String.FromArray(lines, EndOfLine)
 		End Function
@@ -821,16 +818,7 @@ Protected Class IDECommunicator
 		Private mParkedThisRequest As Boolean
 	#tag EndProperty
 	#tag Property, Flags = &h21
-		Private mPendingScripts() As String
-	#tag EndProperty
-	#tag Property, Flags = &h21
-		Private mPendingSinceUS() As Double
-	#tag EndProperty
-	#tag Property, Flags = &h21
-		Private mPendingSockets() As IPCSocket
-	#tag EndProperty
-	#tag Property, Flags = &h21
-		Private mPendingTags() As String
+		Private mPending() As PendingRequest
 	#tag EndProperty
 	#tag Constant, Name = kPendingGiveUpMS, Type = Double, Dynamic = False, Default = \"7200000", Scope = Private, Description = 486F77206C6F6E672061207061726B656420736F636B65742069732068656C64206F70656E2077616974696E6720666F72207468652049444520746F20616E737765722C20696E206D696C6C697365636F6E647320283220686F757273292E
 	#tag EndConstant
