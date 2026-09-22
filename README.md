@@ -540,7 +540,7 @@ XMCP keeps reading for a short window (250 ms) after the first matching frame an
 
 A reply carrying nothing but warnings is not answered at all - its socket is parked instead, on the basis that the output is still to come. That case has not been observed: measured against the IDE socket on 2025r3.1 and 2026r2.1, a compiler warning always arrived together with the output, never ahead of it.
 
-Because a script with no `Print` never answers, `run_ide_script` appends one before sending. Without it the request times out, its socket is parked as though the IDE were busy, and every later request is refused until the give-up timer expires - one `Print`-less script would block the session.
+Because a script with no `Print` never answers, `SendAndReceive` appends one to every request before sending - in the transport rather than in each tool, so no tool can forget and a caller-supplied script cannot reintroduce the failure. Without it the request times out, its socket is parked as though the IDE were busy, and every later request is refused until the give-up timer expires - one `Print`-less script would block the session.
 
 The reply shapes XMCP recognises: a string (what the script printed), an empty object (it printed an empty string), `scriptError` - a **heterogeneous** array whose entries are `scriptCompilerError`, `scriptRuntimeError` or `scriptCompilerWarning`, so a warnings-only array means the script ran - and `buildError` with `errors` and `warnings`, plus `missingFiles`, `openErrors` and `loadError`. Script error line numbers are reported one lower than the IDE sends them, because the IDE wraps every script in a line of boilerplate before compiling it.
 

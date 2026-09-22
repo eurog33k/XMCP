@@ -387,14 +387,17 @@ Measured against the IDE socket directly on macOS and Windows, both Xojo 2026r2.
 | Script | Reply |
 |---|---|
 | `Print "one"` | one reply |
-| `Print "one"` then `Print "two"` | **two replies** - `run_ide_script` reports the first and drops the rest |
+| `Print "one"` then `Print "two"` | **two replies** - XMCP merges them and reports the most significant part |
 | no `Print` | **no reply at all** |
 | `Print ""` | one reply, an empty object |
 
 So **print once**, at the point whose value you want back. Printing twice does not
-concatenate; the later value is discarded.
+concatenate: XMCP merges the replies and reports the most significant part - an error
+outranks printed output, which outranks a warnings-only reply. With two plain `Print`s
+you therefore see the first, but if a later part carries an error that is what you get
+back, so a second `Print` is not a reliable way to return a second value.
 
-A script with no `Print` would never be answered, so `run_ide_script` appends one
+A script with no `Print` would never be answered, so XMCP appends one to every request
 before sending and reports "The script ran but produced no value." You do not need to
 add a trailing `Print` yourself. Some commands genuinely have no value to give -
 `PropertyValue` returns nothing for an item it does not support - and that is not a
