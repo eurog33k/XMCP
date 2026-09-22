@@ -62,14 +62,14 @@ Inherits MCPKit.Tool
 		  If response.HasKey("response") Then
 		    Var resp As Variant = response.Value("response")
 		    If resp.Type = Variant.TypeString Then
-		      If resp.StringValue = "" Then Return NoOutputResult
+		      If resp.StringValue = "" Then Return NoOutputResult(suffix)
 		      Return MCPKit.ToolResult.Success(resp.StringValue + suffix)
 		    Else
 		      Var respJSON As JSONItem = response.Value("response")
 		      // An empty object is what the IDE answers when the script printed nothing. It is
 		      // not necessarily a failure, but returning a bare "{}" reads like output. So is a
 		      // warnings-only object: the script ran, it just printed nothing.
-		      If respJSON.Count = 0 Or App.IDE.ReplyKind(response) = "warning" Then Return NoOutputResult
+		      If respJSON.Count = 0 Or App.IDE.ReplyKind(response) = "warning" Then Return NoOutputResult(suffix)
 		      Return MCPKit.ToolResult.Success(respJSON.ToString + suffix)
 		    End If
 		  End If
@@ -81,8 +81,10 @@ Inherits MCPKit.Tool
 
 
 	#tag Method, Flags = &h21
-		Private Function NoOutputResult() As MCPKit.ToolResult
-		  /// The script ran but produced no value.
+		Private Function NoOutputResult(suffix As String = "") As MCPKit.ToolResult
+		  /// The script ran but produced no value. Any compiler warnings the script raised are
+		  /// passed in as suffix: a script that prints nothing still reports them, otherwise a
+		  /// warning would be heard only when the script happened to print something too.
 		  ///
 		  /// Measured against the IDE socket on 2026r2.1: the IDE sends one reply frame per
 		  /// Print, not just the first - two Prints answer twice, under the same tag. A script
@@ -97,8 +99,10 @@ Inherits MCPKit.Tool
 		  "it does not support, since it only reads framework properties of items such as App " + _
 		  "or a Window. Neither case means the script failed: verify the effect in a separate " + _
 		  "call. Note that the IDE answers once per Print, so several Prints send several " + _
-		  "replies; the first meaningful one is reported and the later ones are not returned. " + _
-		  "Print once, at the point whose value you want back.")
+		  "replies; XMCP merges them and reports the most significant part - an error outranks " + _
+		  "printed output, which outranks a warnings-only reply - so a later Print's value " + _
+		  "can be the one you see. " + _
+		  "Print once, at the point whose value you want back." + suffix)
 
 		End Function
 	#tag EndMethod
