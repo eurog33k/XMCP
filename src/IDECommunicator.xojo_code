@@ -466,9 +466,16 @@ Protected Class IDECommunicator
 		  
 		  If envelope = Nil Or Not envelope.HasKey("response") Then Return "unknown"
 		  
+		  // Anything that is not an object is what the script produced. A string is the usual
+		  // case, but a reply part can also be a number or a boolean, and those used to be
+		  // classified by attempting a JSONItem cast and catching the failure - control flow
+		  // hidden in an exception handler, which is both slower and easy to misread as an
+		  // error path. Ask what the value is instead.
 		  Var resp As Variant = envelope.Value("response")
-		  If resp.Type = Variant.TypeString Then Return "output"
+		  If resp.Type <> Variant.TypeObject Then Return "output"
 		  
+		  // It is an object, but not every object is a JSONItem; one that is not is still
+		  // something the script produced, so the cast keeps its guard.
 		  Var obj As JSONItem
 		  Try
 		    obj = envelope.Value("response")
@@ -520,9 +527,22 @@ Protected Class IDECommunicator
 		  /// {"missingFiles": "Unable to build. Please specify a Key Store properties file..."},
 		  /// a precise message that used to be dropped as an unrecognised object.
 		  
+		  // Guarded independently of ReplyKind. Reading the response out of the envelope is
+		  // only safe because ReplyKind returned "error", which implies a non-Nil envelope
+		  // carrying a JSONItem response - a contract held in another method's head. If that
+		  // classification ever widens, this would raise a NilObjectException rather than
+		  // report the error it was asked about, so it checks for itself.
+		  If envelope = Nil Or Not envelope.HasKey("response") Then Return ""
 		  If ReplyKind(envelope) <> "error" Then Return ""
 		  
-		  Var obj As JSONItem = envelope.Value("response")
+		  Var obj As JSONItem
+		  Try
+		    obj = envelope.Value("response")
+		  Catch e As RuntimeException
+		    Return ""
+		  End Try
+		  If obj = Nil Then Return ""
+		  
 		  Var lines() As String
 		  
 		  If obj.HasKey("scriptError") Then
@@ -562,7 +582,7 @@ Protected Class IDECommunicator
 		  Var lines() As String
 		  
 		  Var candidates() As JSONItem
-		  If envelope.HasKey("response") And envelope.Value("response").Type <> Variant.TypeString Then
+		  If envelope.HasKey("response") And envelope.Value("response").Type = Variant.TypeObject Then
 		    Try
 		      candidates.Add(JSONItem(envelope.Value("response")))
 		    Catch e As RuntimeException
@@ -691,6 +711,13 @@ Protected Class IDECommunicator
 		    Next i
 		    If primary >= 0 Then Exit For r
 		  Next r
+		  
+		  // Nothing matched any rank. That happens in exactly one case: every frame was an
+		  // output whose string was empty, so the preference above skipped all of them and no
+		  // later rank could match either, since they are all "output". An empty output is
+		  // still the script's answer - a script that printed empty strings - so take the
+		  // first one deliberately. Arriving here by falling out of the rank table read like
+		  // an oversight; it is a real case with a real answer.
 		  If primary < 0 Then primary = 0
 		  
 		  Var merged As JSONItem = frames(primary)
