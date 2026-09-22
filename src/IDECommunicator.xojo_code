@@ -663,16 +663,25 @@ Protected Class IDECommunicator
 		  Return String.FromArray(lines, EndOfLine)
 		End Function
 	#tag EndMethod
-	#tag Method, Flags = &h21
-		Private Function FormatDiagnosticList(list As JSONItem, defaultType As String) As String
+	#tag Method, Flags = &h0
+		Function FormatDiagnosticList(list As JSONItem, defaultType As String, preferDefaultType As Boolean = False) As String
 		  /// One line per buildError entry: type, message, location and position.
+		  ///
+		  /// Public because a tool can need these lines under its own heading: analyze_project
+		  /// reports "Analysis results", not "Build errors", so it formats the lists itself
+		  /// rather than taking ReplyDiagnostics' wording wholesale. Sharing the line format is
+		  /// the point - it was hand-rolled a second time there, twice over.
 		  
 		  If list = Nil Then Return ""
 		  Var lines() As String
 		  For i As Integer = 0 To list.Count - 1
 		    Var err As JSONItem = list.ChildAt(i)
 		    If err = Nil Then Continue
-		    Var errType As String = If(err.HasKey("type"), err.Value("type").StringValue, defaultType)
+		    // Xojo's "type" is the issue category - "Code" - not its severity, so it reads the
+		    // same on an error and on a warning. A caller whose heading does not already say
+		    // which it is asks for defaultType instead, so a warning line still says Warning.
+		    Var errType As String = defaultType
+		    If Not preferDefaultType And err.HasKey("type") Then errType = err.Value("type").StringValue
 		    Var msg As String = If(err.HasKey("message"), err.Value("message").StringValue, "")
 		    Var location As String = If(err.HasKey("location"), err.Value("location").StringValue, "")
 		    Var position As String = If(err.HasKey("position"), err.Value("position").StringValue, "")
