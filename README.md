@@ -48,15 +48,27 @@ XMCP also ships a `usage-guide.md` file next to the binary, exposed as an MCP re
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Create the file if it doesn't exist yet. Claude Desktop has no file tools of its own, so it's the client most people want `--enable-file-tools` for — a complete config combining that with a custom documentation path looks like this (every flag lives in the same `args` array; see [Usage](#usage) below for the full list):
+
 ```json
 {
   "mcpServers": {
     "xmcp": {
-      "command": "/path/to/XMCP"
+      "command": "/path/to/XMCP",
+      "args": [
+        "--docs-path", "/path/to/Documentation",
+        "--enable-file-tools",
+        "--file-root", "/tmp,/path/to/your/projects"
+      ]
     }
   }
 }
 ```
+
+Fully quit and reopen Claude Desktop after saving — it only reads this file at launch, so a reload isn't enough.
 
 **OpenAI Codex CLI** (`~/.codex/config.toml`):
 

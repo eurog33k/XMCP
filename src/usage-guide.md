@@ -46,7 +46,7 @@ When enabled, access is restricted to an allowlist of directories given via `--f
 - `read_file` — read UTF-8 text; `offset`/`length` are **character** offsets, so chunked reads never split a multibyte sequence. Returns content verbatim with no added header, so it's always safe to write straight back with `write_file`.
 - `hash_file` — MD5 or SHA-256 hex digest, streamed in 1 MB chunks (arbitrarily large files supported)
 
-Typical Claude Desktop configuration:
+Typical Claude Desktop configuration — combine with `--docs-path` in the same `args` array if you also want a custom documentation path (see the README's [Claude Desktop setup](../README.md#installation) for the config file's location on macOS/Windows):
 
 ```json
 "args": ["--enable-file-tools", "--file-root", "/tmp,/Users/you/GitHub"]
