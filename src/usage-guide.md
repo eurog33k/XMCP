@@ -20,7 +20,7 @@ This file is automatically loaded as an MCP resource when you connect to XMCP. I
 
 ## What XMCP can do
 
-XMCP gives you direct control over the Xojo IDE via 31 tools (34 with the opt-in file tools enabled):
+XMCP gives you direct control over the Xojo IDE via 31 tools on macOS and 30 on Windows (34 and 33 with the opt-in file tools enabled). The difference is `get_system_log`, which reads the macOS unified log and is not registered on other platforms:
 
 - **Navigate**: `list_project_items`, `get_current_location`, `select_project_item`
 - **Read/write code**: `get_code`, `set_code`, `get_selected_text`, `set_selected_text`
@@ -38,7 +38,7 @@ XMCP gives you direct control over the Xojo IDE via 31 tools (34 with the opt-in
 
 ### Optional file tools (opt-in)
 
-Three additional tools — `write_file`, `read_file`, and `hash_file` — provide direct filesystem access for MCP clients that lack built-in file tools (e.g. Claude Desktop). They are **disabled by default** and only registered when the server is started with `--enable-file-tools`, bringing the tool count to 34. If your MCP client already has its own file tools (e.g. Claude Code), leave these off — that's the point of the opt-in flag.
+Three additional tools — `write_file`, `read_file`, and `hash_file` — provide direct filesystem access for MCP clients that lack built-in file tools (e.g. Claude Desktop). They are **disabled by default** and only registered when the server is started with `--enable-file-tools`, bringing the tool count to 34 on macOS, 33 on Windows. If your MCP client already has its own file tools (e.g. Claude Code), leave these off — that's the point of the opt-in flag.
 
 When enabled, access is restricted to an allowlist of directories given via `--file-root` as comma-separated absolute paths (default: `/tmp`). Paths are lexically canonicalised (`.`/`..` segments resolved, duplicate slashes collapsed, macOS's symlinked `/tmp`, `/var`, `/etc` mapped to their `/private` equivalents), then resolved through `realpath(3)` and re-normalised before comparison, so a symlink inside an allowed root cannot be used to write outside it. Residual risk: the check and the subsequent file open are separate syscalls, so a symlink swapped in between the two would still escape — Xojo exposes no `openat`-style primitive to close that gap. Requests outside the allowed roots fail with an "Access denied" result.
 
