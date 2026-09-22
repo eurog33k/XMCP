@@ -22,12 +22,10 @@ Inherits MCPKit.Tool
 		  End If
 
 		  Var scope As String = "project"
-		  Var timeoutMS As Integer = CType(kDefaultTimeoutMS, Integer)
+		  Var timeoutMS As Integer = TimeoutArg(args, CType(kDefaultTimeoutMS, Integer))
 		  For Each arg As MCPKit.ToolArgument In args
 		    If arg.Name = "scope" Then scope = arg.Value.StringValue.Lowercase
-		    If arg.Name = "timeout" Then timeoutMS = arg.Value.IntegerValue
 		  Next
-		  If timeoutMS <= 0 Then timeoutMS = CType(kDefaultTimeoutMS, Integer)
 
 		  Var command As String
 		  If scope = "item" Then

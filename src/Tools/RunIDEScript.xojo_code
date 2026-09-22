@@ -12,7 +12,7 @@ Inherits MCPKit.Tool
 
 		  Parameters.Add(New MCPKit.ToolParameter("timeout", MCPKit.ToolParameterTypes.Integer_, _
 		  "Timeout in milliseconds to wait for a response. Default is 10000 (10 seconds).", _
-		  True, 10000, False))
+		  True, CType(kDefaultTimeoutMS, Integer), False))
 
 		End Sub
 	#tag EndMethod
@@ -20,12 +20,10 @@ Inherits MCPKit.Tool
 	#tag Method, Flags = &h0
 		Function Run(args() As MCPKit.ToolArgument) As MCPKit.ToolResult
 		  Var script As String = ""
-		  Var timeoutMS As Integer = 10000
+		  Var timeoutMS As Integer = TimeoutArg(args, CType(kDefaultTimeoutMS, Integer))
 		  For Each arg As MCPKit.ToolArgument In args
 		    If arg.Name = "script" Then
 		      script = arg.Value.StringValue
-		    ElseIf arg.Name = "timeout" Then
-		      timeoutMS = arg.Value.IntegerValue
 		    End If
 		  Next arg
 
@@ -106,6 +104,9 @@ Inherits MCPKit.Tool
 
 		End Function
 	#tag EndMethod
+
+	#tag Constant, Name = kDefaultTimeoutMS, Type = Double, Dynamic = False, Default = \"10000", Scope = Private
+	#tag EndConstant
 
 	#tag ViewBehavior
 		#tag ViewProperty

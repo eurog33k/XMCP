@@ -27,11 +27,7 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Failure("Xojo IDE is not connected. Start the IDE and restart XMCP.")
 		  End If
 
-		  Var timeoutMS As Integer = CType(kDefaultTimeoutMS, Integer)
-		  For Each arg As MCPKit.ToolArgument In args
-		    If arg.Name = "timeout" And arg.Value.IntegerValue > 0 Then timeoutMS = arg.Value.IntegerValue
-		  Next arg
-		  
+		  Var timeoutMS As Integer = TimeoutArg(args, CType(kDefaultTimeoutMS, Integer))
 		  Var response As JSONItem = App.IDE.SendAndReceive(script, timeoutMS)
 		  If response = Nil Then
 		    If App.IDE.LastErrorMessage <> "" Then
