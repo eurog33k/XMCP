@@ -256,6 +256,40 @@ reproduce a "Windows" problem that was really a project-size problem. And an
 because plugin compilation was already cached, and a macOS target left enabled made an
 earlier run report a teardown artifact rather than the build's own outcome.
 
+
+## Review findings (PR #11 code review, 2026-09-21)
+
+| # | Finding | mac | win |
+|---|---|-----|-----|
+| 1 | 30 s warning wait capped by the request timeout | ✅ | ✅ |
+| 10 | `Print` sentinel patched into one tool, not the transport | ✅ | ✅ |
+| 2 | Unconditional append vs. trailing line continuation | ✅ (guard) | ✅ |
+| 3 | `DrainPending` releases on a partial TCP read | ☐ | ☐ |
+| 4 | `ReplyKind` classifies a scalar as output | ☐ | ☐ |
+| 5 | `MergeReply` fallthrough when all frames are empty output | ☐ | ☐ |
+| 6 | `ReplyDiagnostics` Nil-check coupled to `ReplyKind` | ☐ | ☐ |
+| 7 | `AnalyzeProject` not converted to the shared classifier | ☐ | ☐ |
+| 8 | Timeout arg parsing duplicated across three tools | ☐ | ☐ |
+| 9 | Pending state as four parallel arrays | ☐ | ☐ |
+
+**1 and 10, verified both platforms at `eef453f`.** The resolution was not what the
+review proposed for 1: rather than making the 30 s wait work, the branch was removed.
+The premise — that a warning arrives ahead of the output — was ours, asserted in a
+code comment and the constant's description, and five measurements across 2025r3.1
+and 2026r2.1 could not reproduce it. What remains is the part that fixes the harm:
+a warnings-only reply is parked rather than answered-and-closed.
+
+10 was done first because 1 depends on it: parking is only safe if every request is
+guaranteed a reply, and that guarantee lived in one tool by convention.
+
+Checks run on both: `Print`-less script does not park, output+warning both reported,
+line continuation yields a compile error rather than a park, `revert_project` still
+matches its exact replies despite the extra sentinel frame.
+
+**Open wording issue.** `NoOutputResult`'s message says later replies "are not
+returned" without saying by whom. The IDE does send them; XMCP does not pass them on.
+Misread twice by a careful reader, so the sentence needs fixing.
+
 ## PR 3 — XojoKit parser
 
 | # | Check | mac | win |
