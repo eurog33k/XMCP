@@ -6,6 +6,7 @@ Protected Class PendingRequest
 		  Tag = requestTag
 		  Script = requestScript
 		  SinceUS = System.Microseconds
+		  LastDataUS = System.Microseconds
 		End Sub
 	#tag EndMethod
 
@@ -24,8 +25,21 @@ Protected Class PendingRequest
 		  /// The bytes are kept only to find that terminator. Nobody reads them: the caller
 		  /// gave up on this request long ago and the reply is discarded on release.
 		  
-		  Buffer = Buffer + Sock.ReadAll
-		  Return Buffer.IndexOf(Chr(0)) >= 0
+		  Var chunk As String = Sock.ReadAll
+		  If chunk <> "" Then
+		    Buffer = Buffer + chunk
+		    LastDataUS = System.Microseconds
+		  End If
+		  
+		  If Buffer.IndexOf(Chr(0)) < 0 Then Return False
+		  
+		  // A whole frame has arrived - but one reply can be several frames, which is the
+		  // premise the live reader is built on: it keeps reading for kSplitReplyWindowMS after
+		  // the first matching frame rather than answering on it. This path had no equivalent,
+		  // so it released on frame one and closed the socket while the IDE could still be
+		  // writing frame two - the same SIGPIPE, on the other path. Wait for the connection to
+		  // fall quiet before calling the reply finished.
+		  Return System.Microseconds - LastDataUS >= kQuietAfterFrameMS * 1000.0
 		End Function
 	#tag EndMethod
 
@@ -50,6 +64,10 @@ Protected Class PendingRequest
 	#tag EndProperty
 
 	#tag Property, Flags = &h0
+		LastDataUS As Double
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
 		Script As String
 	#tag EndProperty
 
@@ -64,6 +82,9 @@ Protected Class PendingRequest
 	#tag Property, Flags = &h0
 		Tag As String
 	#tag EndProperty
+
+	#tag Constant, Name = kQuietAfterFrameMS, Type = Double, Dynamic = False, Default = \"250", Scope = Private
+	#tag EndConstant
 
 
 End Class

@@ -71,6 +71,15 @@ Inherits MCPKit.Tool
 		      End If
 		      hostCreated = True
 		    ElseIf windowsBefore < 1 Then
+		      // Say why it could not be read when the IDE told us. The usual reason now is the
+		      // refusal that arrives while an earlier request is still parked, and "the IDE is
+		      // still executing an earlier request" is a far more useful thing to read than a
+		      // generic warning about quitting the IDE.
+		      Var why As String = App.IDE.LastErrorMessage
+		      If why <> "" Then
+		        Return MCPKit.ToolResult.Failure("Could not read how many workspace windows are open, " + _
+		        "so closing the project might quit the IDE. Nothing was changed." + EndOfLine + EndOfLine + why)
+		      End If
 		      Return MCPKit.ToolResult.Failure("Could not read how many workspace windows are open, " + _
 		      "so closing the project might quit the IDE. Nothing was changed.")
 		    End If
@@ -238,6 +247,9 @@ Inherits MCPKit.Tool
 		  /// This is what makes closing a project safe on Windows: with more than one window
 		  /// open, closing one cannot quit the IDE.
 
+		  // -1 means "could not read it". App.IDE.LastErrorMessage still holds why, and the
+		  // caller reports it: a parked-request refusal used to be flattened into a generic
+		  // "might quit the IDE" message that named no cause.
 		  Var response As JSONItem = App.IDE.SendAndReceive("Print Str(WindowCount)")
 		  If response = Nil Or Not response.HasKey("response") Then Return -1
 

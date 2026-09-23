@@ -27,7 +27,11 @@ Inherits MCPKit.Tool
 		    End If
 		  Next arg
 
-		  If script = "" Then
+		  // Trimmed: a script of nothing but whitespace is as empty as "". It used to pass this
+		  // guard and then defeat the sentinel too, because the sentinel was skipped when the
+		  // trimmed script was empty - so it reached the IDE with no Print, was never answered,
+		  // and parked its socket for the full give-up window.
+		  If script.Trim = "" Then
 		    Return MCPKit.ToolResult.Failure("The script parameter is required.")
 		  End If
 

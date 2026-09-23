@@ -123,8 +123,13 @@ Protected Class IDECommunicator
 		  // into that line and change its meaning. Such a script does not compile, and a
 		  // compile error is itself a reply, so it cannot park either way.
 		  Var sent As String = script
+		  // Appended unless the script ends in a line continuation, where it would be absorbed
+		  // into that line and change its meaning. An empty or whitespace-only script gets one
+		  // too: there is no trailing line to absorb it, and without it such a script reaches
+		  // the IDE with no Print at all, is never answered, and parks its socket. Tools guard
+		  // against sending one, but the guarantee belongs here, where no caller can skip it.
 		  Var tail As String = script.Trim
-		  If tail <> "" And tail.Right(1) <> "_" Then
+		  If tail = "" Or tail.Right(1) <> "_" Then
 		    sent = script + EndOfLine + "Print """""
 		  End If
 		  
@@ -414,9 +419,20 @@ Protected Class IDECommunicator
 		  Var collectUntilUS As Double = deadlineUS
 		  
 		  While System.Microseconds < deadlineUS And System.Microseconds < collectUntilUS
-		    sock.Poll
+		    // Guarded like Connect and Write above, and like DrainPending's own Poll. The write
+		    // has already succeeded here, so the IDE may be executing the script; an exception
+		    // escaping would skip both the merge below and the parking below it, leaking an
+		    // open socket and losing the guarantee that a delivered script is never resent.
+		    // Stop reading and let it park - DrainPending will fail the same way and release it.
+		    Var chunk As String
+		    Try
+		      sock.Poll
+		      chunk = sock.ReadAll
+		    Catch e As RuntimeException
+		      LogVerbose("IDE request " + tag + ": polling failed (" + e.Message + "); parking it.")
+		      Exit
+		    End Try
 
-		    Var chunk As String = sock.ReadAll
 		    If chunk = "" Then
 		      App.SleepCurrentThread(5)
 		      Continue
@@ -468,10 +484,14 @@ Protected Class IDECommunicator
 		    Return MergeReply(frames)
 		  End If
 		  
+		  // Data arrived for some other tag and nothing for ours. This used to close the socket
+		  // and return without setting mParkedThisRequest, which was wrong twice over: the
+		  // caller's candidate loop then resent a script the IDE had already accepted, and
+		  // closing a connection the IDE still owes a reply on is the SIGPIPE this class exists
+		  // to avoid. A foreign frame says nothing about our request except that the IDE is
+		  // busy - which is what parking is for - so it is logged and falls through.
 		  If hadData And frames.Count = 0 Then
-		    sock.Close
-		    LastErrorMessage = "Received IPC data from " + candidatePath + ", but no matching tag was found for " + tag + "."
-		    Return Nil
+		    LogVerbose("IDE request " + tag + ": data from " + candidatePath + " carried another tag; ours is still outstanding.")
 		  End If
 		  
 		  // The IDE accepted the request - connect and write both succeeded - and has not
