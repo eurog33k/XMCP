@@ -167,7 +167,7 @@ Inherits MCPKit.Tool
 		      If openResponse = Nil Then
 		        detail = App.IDE.LastErrorMessage
 		      Else
-		        detail = ScriptErrorText(openResponse)
+		        detail = App.IDE.ReplyDiagnostics(openResponse)
 		      End If
 		      If detail <> "" Then detail = " (" + detail + ")"
 
@@ -322,33 +322,16 @@ Inherits MCPKit.Tool
 
 		  ideReachable = True
 
-		  If ScriptErrorText(response) <> "" Then Return ""
+		  // A real error means there is no path to read. A warnings-only reply or an empty
+		  // object means the script ran and printed nothing - there is no path then either, but
+		  // not because anything failed. Either way the answer is "", and only an actual string
+		  // is read, so a non-string response can no longer be coerced into a path.
+		  If App.IDE.ReplyDiagnostics(response) <> "" Then Return ""
 		  If Not response.HasKey("response") Then Return ""
-
-		  Return response.Value("response").StringValue.Trim
-
-		End Function
-	#tag EndMethod
-
-	#tag Method, Flags = &h21
-		Private Function ScriptErrorText(response As JSONItem) As String
-		  /// Returns the IDE's error text if the response carries one, otherwise "".
-		  ///
-		  /// A successful script answers with a string (whatever it printed). Anything else
-		  /// is an object such as {"scriptError": [...]}, which must not be mistaken for
-		  /// success - the previous version of this tool reported it as one.
-
-		  If response = Nil Or Not response.HasKey("response") Then Return ""
-
+		  
 		  Var resp As Variant = response.Value("response")
-		  If resp.Type = Variant.TypeString Then Return ""
-
-		  Try
-		    Var respJSON As JSONItem = response.Value("response")
-		    Return respJSON.ToString
-		  Catch e As RuntimeException
-		    Return "unrecognised IDE response"
-		  End Try
+		  If resp.Type <> Variant.TypeString Then Return ""
+		  Return resp.StringValue.Trim
 
 		End Function
 	#tag EndMethod
