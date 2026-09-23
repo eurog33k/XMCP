@@ -6,7 +6,7 @@ Inherits MCPKit.Tool
 		  Super.Constructor("build_project", "Builds the current Xojo project using the IDE's configured Build Settings. Returns build errors on failure, or a success message on success.")
 
 		  Parameters.Add(New MCPKit.ToolParameter("timeout", MCPKit.ToolParameterTypes.Integer_, _
-		  "How long to wait for the build, in milliseconds. Default is 1800000 (30 minutes). Set it generously: giving up does not stop the build, it only means the result is not reported.", _
+		  "How long to wait for the build, in milliseconds. Default is 1800000 (30 minutes). 0 or a negative value means this default, not 'no limit'. If it takes longer, it carries on in the IDE and this request is left waiting for the answer: further requests are turned down until the IDE answers, and the MCP client must not be quit or restarted meanwhile - on macOS and Linux the IDE crashes if it answers after that. So set it generously.", _
 		  True, CType(kDefaultTimeoutMS, Integer), False))
 		  
 		End Sub

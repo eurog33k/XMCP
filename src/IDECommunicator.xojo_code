@@ -103,7 +103,8 @@ Protected Class IDECommunicator
 		    // "has not answered" would then be untrue.
 		    LastErrorMessage = "The Xojo IDE is still busy with an earlier request and has not finished answering it:" + _
 		    EndOfLine + PendingSummary + EndOfLine + _
-		    "No new request was sent. A build blocks the IDE until it finishes; wait for it, then try again. " + _
+		    "No new request was sent. Something is keeping the IDE busy - usually a build, or a dialog in " + _
+		    "the IDE waiting for a click. Let the build finish or click the dialog, then try again. " + _
 		    "Do not quit or restart Claude Code (or whichever MCP client you use) meanwhile: on macOS " + _
 		    "and Linux the Xojo IDE crashes if it answers over a connection that has been closed."
 		    LogVerbose("IDE request refused: " + LastErrorMessage)
@@ -179,7 +180,10 @@ Protected Class IDECommunicator
 		    
 		    If mParkedThisRequest Then
 		      mParkedThisRequest = False
-		      LastErrorMessage = String.FromArray(socketErrors, " | ")
+		      // LastErrorMessage is left as the parking message from the path that took the request.
+		      // Once a request has been delivered, what the other paths said - usually "socket not
+		      // found" - is beside the point, and joining it in front put that noise ahead of the
+		      // warning not to quit the client.
 		      Exit While
 		    End If
 		    
