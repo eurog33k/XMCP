@@ -64,6 +64,13 @@ Inherits MCPKit.Tool
 		  If response.HasKey("response") Then
 		    Var resp As Variant = response.Value("response")
 		    If resp.Type = Variant.TypeString Then
+		      // Exact, not trimmed, unlike build_project, run_project and analyze_project - and
+		      // that difference is deliberate. Those three trim a protocol reply: whether a build
+		      // printed an error object or nothing, where whitespace means nothing. Here the value
+		      // is whatever the caller's script printed. Rule: trim when judging a protocol reply,
+		      // never when handling data. (Whitespace-only output never arrives anyway - the IDE
+		      // collapses a Print of only spaces into an empty reply - so this is about the rule,
+		      // not a case that currently occurs.)
 		      If resp.StringValue = "" Then Return NoOutputResult(suffix)
 		      Return MCPKit.ToolResult.Success(resp.StringValue + suffix)
 		    Else

@@ -299,6 +299,9 @@ Protected Class IDECommunicator
 		  End If
 		  
 		  If warnings <> "" Then
+		    // Exact, for the same reason as MergeReply: resp is data. (A whitespace-only result
+		    // cannot actually reach here - the IDE collapses one to an empty reply - but the test
+		    // should not depend on that.)
 		    If resp = "" Then
 		      resp = "The script ran but printed nothing. The IDE reported warnings about it:" + _
 		      EndOfLine + warnings
@@ -307,7 +310,13 @@ Protected Class IDECommunicator
 		    End If
 		  End If
 		  
-		  If resp.BeginsWith("ERROR:") Then
+		  // Case-sensitive, and deliberately not trimmed. BeginsWith is case-insensitive by
+		  // default in this Xojo version, so "Error: ..." or "error: ..." in a result - a
+		  // constant's value, a line of selected code - was misreported as a failure. Every tool
+		  // that reports its own guard clause prints exactly "ERROR:" at the very start, so the
+		  // exact, case-sensitive prefix is the whole contract; trimming would let data that
+		  // merely contains "ERROR:" after some whitespace be mistaken for one.
+		  If resp.BeginsWith("ERROR:", ComparisonOptions.CaseSensitive) Then
 		    Return MCPKit.ToolResult.Failure(resp)
 		  End If
 		  
@@ -395,8 +404,23 @@ Protected Class IDECommunicator
 		    sock.Write(payload)
 		    sock.Flush
 		  Catch e As RuntimeException
-		    sock.Close
-		    LastErrorMessage = "IPCSocket write failed for " + candidatePath + ": " + e.Message
+		    // The comment above is the rule, and this branch used to break it: it closed the
+		    // socket and returned without setting mParkedThisRequest, so the candidate loop went
+		    // on to the next path and resent the script. On macOS the next path is usually the
+		    // same socket under another name - /tmp is /private/tmp - so a write that had in fact
+		    // reached the IDE before Flush failed would run twice. And closing a connection the
+		    // IDE may answer on is the SIGPIPE this class exists to prevent.
+		    //
+		    // So it parks, like every other case where the request may have been delivered.
+		    // If the connection is really broken, DrainPending finds that on its next poll - the
+		    // poll throws or the socket reports itself closed - and releases it within one idle
+		    // pass, so a dead socket does not hold the IDE's connection slot.
+		    AddPending(sock, tag, script)
+		    mParkedThisRequest = True
+		    LastErrorMessage = "Writing the request to the Xojo IDE failed partway (" + e.Message + "). " + _
+		    "It may or may not have arrived, so it is not being resent, and the connection is kept " + _
+		    "open in case the IDE answers. Further requests are refused until it does or the " + _
+		    "connection is found closed."
 		    Return Nil
 		  End Try
 
@@ -479,6 +503,12 @@ Protected Class IDECommunicator
 		  Next f
 		  
 		  If frames.Count > 0 And Not onlyWarnings Then
+		    // Closed here, once our reply is in hand, and that leaves one residual risk worth
+		    // stating rather than hiding: a further frame for this tag arriving after the
+		    // kSplitReplyWindowMS window would be written into a closed peer. None has been
+		    // observed - every measured multi-part reply arrived within milliseconds - and the
+		    // alternative, parking every answered socket, would hold the IDE's single connection
+		    // slot after each request. The window is the trade.
 		    sock.Close
 		    LastErrorMessage = ""
 		    Return MergeReply(frames)
@@ -772,6 +802,10 @@ Protected Class IDECommunicator
 		      Var kind As String = ReplyKind(frames(i))
 		      If kind = rank(r) Then
 		        // Among outputs, prefer one that actually says something.
+		        // Exact, not trimmed. This ranking picks the answer for every tool, and for most the
+		        // answer is data, so the test is for an empty string and nothing looser. In practice
+		        // the difference is moot for whitespace: measured on 2026r2.1, the IDE collapses a
+		        // Print of only whitespace into an empty reply itself, while "[   ]" keeps its spaces.
 		        If kind = "output" And frames(i).Value("response").Type = Variant.TypeString And _
 		          frames(i).Value("response").StringValue = "" Then Continue
 		        primary = i
