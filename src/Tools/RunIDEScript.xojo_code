@@ -44,7 +44,9 @@ Inherits MCPKit.Tool
 		    If App.IDE.LastErrorMessage <> "" Then
 		      Return MCPKit.ToolResult.Failure(App.IDE.LastErrorMessage)
 		    End If
-		    Return MCPKit.ToolResult.Failure("Timeout waiting for IDE response (" + timeoutMS.ToString + "ms).")
+		    // Worded like RunScript's fallback, so the same situation reads the same in every tool.
+		    Var timeoutS As Integer = timeoutMS / 1000
+		    Return MCPKit.ToolResult.Failure("No answer from the IDE within " + timeoutS.ToString + "s.")
 		  End If
 
 		  // Errors first. ReplyDiagnostics reads every error shape the IDE sends and already
