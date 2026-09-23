@@ -9,7 +9,7 @@ Inherits MCPKit.ServerApplication
 		  /// no other client can reach the IDE at all - not another XMCP, not the IDE
 		  /// Communicator example. Draining only when the next request arrives meant an XMCP
 		  /// that parked a socket and then went quiet locked the IDE away from everyone until
-		  /// the give-up timer expired. Polling here releases it as soon as the IDE answers.
+		  /// the give-up timer expired. Polling here releases it as soon as the IDE has finished answering - that is, once the answer is complete and nothing more has arrived for 250 ms.
 		  ///
 		  /// DrainPending returns immediately when nothing is parked, which is the normal case.
 		  

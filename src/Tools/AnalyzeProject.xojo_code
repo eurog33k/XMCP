@@ -9,7 +9,7 @@ Inherits MCPKit.Tool
 		  True, "project", False))
 		  
 		  Parameters.Add(New MCPKit.ToolParameter("timeout", MCPKit.ToolParameterTypes.Integer_, _
-		  "How long to wait for the analysis, in milliseconds. Default is 300000 (5 minutes). A large project takes longer than the old fixed 60s allowed, and giving up does not stop the IDE analysing.", _
+		  "How long to wait for the analysis, in milliseconds. Default is 300000 (5 minutes); a large project can need more. 0 or a negative value means this default, not 'no limit'. If it takes longer, it carries on in the IDE and this request is left waiting for the answer: further requests are turned down until the IDE answers, and the MCP client must not be quit or restarted meanwhile - on macOS and Linux the IDE crashes if it answers after that.", _
 		  True, CType(kDefaultTimeoutMS, Integer), False))
 
 		End Sub

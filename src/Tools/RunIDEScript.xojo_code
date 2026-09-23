@@ -11,7 +11,7 @@ Inherits MCPKit.Tool
 		  False, "", True))
 
 		  Parameters.Add(New MCPKit.ToolParameter("timeout", MCPKit.ToolParameterTypes.Integer_, _
-		  "Timeout in milliseconds to wait for a response. Default is 10000 (10 seconds).", _
+		  "How long to wait for the script to answer, in milliseconds. Default is 10000 (10 seconds). 0 or a negative value means this default, not 'no limit'. If the script takes longer - or opens a dialog that waits for a click - it carries on in the IDE and this request is left waiting for the answer: further requests are turned down until the IDE answers, and the MCP client must not be quit or restarted meanwhile - on macOS and Linux the IDE crashes if it answers after that.", _
 		  True, CType(kDefaultTimeoutMS, Integer), False))
 
 		End Sub
