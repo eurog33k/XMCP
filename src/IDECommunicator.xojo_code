@@ -99,7 +99,9 @@ Protected Class IDECommunicator
 		  If DrainPending > 0 Then
 		    LastErrorMessage = "The Xojo IDE is still executing an earlier request and has not answered it yet:" + _
 		    EndOfLine + PendingSummary + EndOfLine + _
-		    "No new request was sent. A build blocks the IDE until it finishes; wait for it, then try again."
+		    "No new request was sent. A build blocks the IDE until it finishes; wait for it, then try again. " + _
+		    "Do not quit or restart Claude Code (or whichever MCP client you use) meanwhile: on macOS " + _
+		    "and Linux the Xojo IDE crashes if it answers over a connection that has been closed."
 		    LogVerbose("IDE request refused: " + LastErrorMessage)
 		    Return Nil
 		  End If
@@ -119,17 +121,17 @@ Protected Class IDECommunicator
 		  // reintroduce it. MergeReply ranks real output above an empty reply, so a script
 		  // that does print still reports its own output.
 		  //
-		  // Skipped when the script ends in a line continuation: the sentinel would be absorbed
-		  // into that line and change its meaning. Such a script does not compile, and a
-		  // compile error is itself a reply, so it cannot park either way.
-		  Var sent As String = script
-		  // Appended unless the script ends in a line continuation, where it would be absorbed
-		  // into that line and change its meaning. An empty or whitespace-only script gets one
-		  // too: there is no trailing line to absorb it, and without it such a script reaches
-		  // the IDE with no Print at all, is never answered, and parks its socket. Tools guard
+		  // Skipped only when the script really ends in a line continuation, where the sentinel
+		  // would be absorbed into that line and change its meaning. Such a script does not
+		  // compile, and a compile error is itself a reply, so it cannot park either way. What
+		  // counts as a continuation is decided by EndsWithLineContinuation, not by the last
+		  // character: a comment or a name can end in an underscore too.
+		  //
+		  // An empty or whitespace-only script gets the sentinel as well. Without it such a
+		  // script reaches the IDE with no Print, is never answered, and parks. Tools guard
 		  // against sending one, but the guarantee belongs here, where no caller can skip it.
-		  Var tail As String = script.Trim
-		  If tail = "" Or tail.Right(1) <> "_" Then
+		  Var sent As String = script
+		  If Not EndsWithLineContinuation(script) Then
 		    sent = script + EndOfLine + "Print """""
 		  End If
 		  
@@ -326,6 +328,85 @@ Protected Class IDECommunicator
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
+		Private Function EndsWithLineContinuation(script As String) As Boolean
+		  /// True when the script's last line of code ends in a line continuation, so that an
+		  /// appended line would be absorbed into it.
+		  ///
+		  /// This used to be "the trimmed script's last character is an underscore", and that is
+		  /// wrong in two ways that were each measured on 2026r2.1:
+		  ///   - a comment can end in one. "Var x As Integer = 1 // rename to foo_" followed by
+		  ///     more code runs the next line, so the underscore is not a continuation;
+		  ///   - a name can end in one. "Var foo_ As Integer = 7" is legal.
+		  /// Either as the last line of a script with no Print of its own meant no sentinel, no
+		  /// reply, and the socket parked for the full give-up time.
+		  ///
+		  /// So the trailing comment is removed first - a ' or // outside a string literal - and an
+		  /// underscore then counts only when it is not the end of a name. It cannot be told apart
+		  /// by the space before it: "+_" continues exactly as "+ _" does.
+		  ///
+		  /// When unsure this returns False, which appends the sentinel. That is the safe way to be
+		  /// wrong: a sentinel appended to a real continuation only changes the compile error of a
+		  /// script that could not compile anyway, whereas a skipped one leaves a valid script
+		  /// unanswered.
+		  
+		  Var lines() As String = script.ReplaceLineEndings(Chr(10)).Split(Chr(10))
+		  Var last As String = ""
+		  For i As Integer = lines.LastIndex DownTo 0
+		    If lines(i).Trim <> "" Then
+		      last = lines(i)
+		      Exit
+		    End If
+		  Next i
+		  If last = "" Then Return False
+		  
+		  // Keep the code part of the line. A comment marker inside a string literal is text, so
+		  // track whether we are inside one; a doubled quote toggles twice and stays balanced.
+		  Var code As String = ""
+		  Var inString As Boolean = False
+		  Var n As Integer = last.Length
+		  For i As Integer = 0 To n - 1
+		    Var c As String = last.Middle(i, 1)
+		    If c = Chr(34) Then
+		      inString = Not inString
+		    ElseIf Not inString Then
+		      If c = "'" Then Exit
+		      If c = "/" And i + 1 < n And last.Middle(i + 1, 1) = "/" Then Exit
+		    End If
+		    code = code + c
+		  Next i
+		  code = code.Trim
+		  
+		  // A line that is only a Rem comment has no code at all. (= is case-insensitive here,
+		  // which matches Rem, REM and rem alike.)
+		  If code.Length >= 3 And code.Left(3) = "Rem" Then
+		    If code.Length = 3 Or code.Middle(3, 1) = " " Or code.Middle(3, 1) = Chr(9) Then Return False
+		  End If
+		  
+		  If code.Length = 0 Or code.Right(1) <> "_" Then Return False
+		  If code.Length = 1 Then Return True
+		  
+		  // An underscore that ends a name - foo_ - belongs to the name.
+		  Return Not IsNameCharacter(code.Middle(code.Length - 2, 1))
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function IsNameCharacter(c As String) As Boolean
+		  /// Letters, digits and the underscore. Anything outside ASCII is counted as a letter too:
+		  /// that makes EndsWithLineContinuation return False and append the sentinel, which is
+		  /// the safe way to be wrong.
+		  
+		  If c = "" Then Return False
+		  If c = "_" Then Return True
+		  Var codePoint As Integer = c.Asc
+		  If codePoint >= 48 And codePoint <= 57 Then Return True
+		  If codePoint >= 65 And codePoint <= 90 Then Return True
+		  If codePoint >= 97 And codePoint <= 122 Then Return True
+		  Return codePoint > 127
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
 		Private Sub LogVerbose(message As String)
 		  If App <> Nil And App.Verbose Then
 		    System.DebugLog(message)
@@ -420,7 +501,9 @@ Protected Class IDECommunicator
 		    LastErrorMessage = "Writing the request to the Xojo IDE failed partway (" + e.Message + "). " + _
 		    "It may or may not have arrived, so it is not being resent, and the connection is kept " + _
 		    "open in case the IDE answers. Further requests are refused until it does or the " + _
-		    "connection is found closed."
+		    "connection is found closed. Do not quit or restart Claude Code (or whichever MCP client " + _
+		    "you use) meanwhile: on macOS and Linux the Xojo IDE crashes if it answers over a " + _
+		    "connection that has been closed."
 		    Return Nil
 		  End Try
 
@@ -483,8 +566,12 @@ Protected Class IDECommunicator
 		        Else
 		          LogVerbose("IDE request " + tag + ": ignoring a frame for another tag (stale or unsolicited).")
 		        End If
-		      Catch e As JSONException
-		        // Ignore malformed chunks and continue.
+		      Catch e As RuntimeException
+		        // Any exception, not only JSONException. The write has already succeeded here, so
+		        // one escaping - a tag that is not a string, say - would skip both the merge and
+		        // the parking below, leaving an open socket that is neither answered nor parked.
+		        // A frame that cannot be read is skipped, like a malformed one always was.
+		        LogVerbose("IDE request " + tag + ": skipped an unreadable frame (" + e.Message + ").")
 		      End Try
 		    Wend
 		  Wend
@@ -534,7 +621,10 @@ Protected Class IDECommunicator
 		  LastErrorMessage = "The Xojo IDE accepted the request but has not answered within " + timeoutMS.ToString + _
 		  "ms. It is most likely busy - a build, or a modal dialog waiting for a click - and it will finish " + _
 		  "the request regardless. The connection is kept open so the IDE can reply safely; that reply will " + _
-		  "be discarded. Further requests are refused until the IDE has answered."
+		  "be discarded. Further requests are refused until the IDE has answered." + _
+		  " Do not quit or restart Claude Code (or whichever MCP client you use) until then: " + _
+		  "quitting closes this connection, and on macOS and Linux the Xojo IDE crashes if it " + _
+		  "answers over a connection that has been closed."
 		  
 		  Return Nil
 		End Function
@@ -885,6 +975,11 @@ Protected Class IDECommunicator
 		        done = True
 		        reason = "the IDE closed the connection"
 		      ElseIf System.Microseconds - req.SinceUS > kPendingGiveUpMS * 1000.0 Then
+		        // The one release that closes a socket the IDE may still answer. If it does answer
+		        // after this - a build longer than the limit, a dialog left open for hours - that
+		        // write hits a closed peer, which on macOS and Linux is the SIGPIPE parking exists
+		        // to prevent. It is a deliberate bound: without one, a request the IDE never
+		        // answers would hold its only IPC connection for as long as this process lives.
 		        Var giveUpMinutes As Integer = kPendingGiveUpMS / 60000
 		        done = True
 		        reason = "it was parked for over " + giveUpMinutes.ToString + " minutes"

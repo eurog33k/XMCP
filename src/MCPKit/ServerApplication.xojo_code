@@ -35,6 +35,12 @@ Inherits ConsoleApplication
 		    App.DoEvents(10)
 		    RaiseEvent Idle
 
+		    // This is meant to stop the server when the client stops sending it requests and
+		    // closes the connection it sends them on. Tested on 2026-09-23 on macOS, it does not
+		    // work: when that connection is closed, XMCP never notices and keeps running until it
+		    // is stopped some other way. Claude Code is not affected, because it stops XMCP with a
+		    // stop signal instead. This predates the IDE-connection work and is recorded in the
+		    // README under Decisions and known limits as a problem to fix separately.
 		    If StdIn.EndOfFile Then Quit
 
 		    Try

@@ -390,6 +390,7 @@ Measured against the IDE socket directly on macOS and Windows, both Xojo 2026r2.
 | `Print "one"` then `Print "two"` | **two replies** - XMCP merges them and reports the most significant part |
 | no `Print` | **no reply at all** |
 | `Print ""` | one reply, an empty object |
+| `Print "   "` (only spaces) | the same empty reply - the IDE collapses it; `Print "[   ]"` keeps its spaces |
 
 So **print once**, at the point whose value you want back. Printing twice does not
 concatenate: XMCP merges the replies and reports the most significant part - an error
@@ -405,7 +406,27 @@ failure: verify the effect in a separate call.
 
 Structured tools that go through the same IDE communication (`list_project_items`,
 `debug_control`, `constant_value`) normalise an empty reply internally, so an
-empty-looking result from them means the value genuinely is empty.
+empty-looking result from them means the value genuinely is empty. Because the IDE
+collapses a `Print` of only spaces, `constant_value` cannot return a constant whose
+value is nothing but whitespace - it reads as empty.
+
+Compiler warnings are reported by `run_ide_script` together with the output, because
+the script is yours. Other tools keep warnings about the scripts XMCP generates for
+them out of the result, since that result is data (selected text, a constant's value)
+and a diagnostic appended to it would corrupt it; they mention a warning only when the
+script printed nothing. `debug_control` and `stop_project` report success even when no
+debug session is running - confirm the state another way.
+
+### While the IDE is still answering a request, do not quit or restart the client
+
+When a request takes longer than its time limit - a long build, or a dialog waiting for a
+click - XMCP keeps its connection to the IDE open until the answer arrives, and turns
+down new requests meanwhile, naming the one that is still waiting. Both messages say not
+to quit or restart Claude Code (or whichever MCP client is in use) until the IDE has
+answered. Take that literally: quitting stops XMCP, which closes the connection, and on
+macOS and Linux the Xojo IDE crashes when it then answers. Tell the user to let the build
+finish or click the dialog, and wait for the refusals to stop. Do not kill XMCP processes
+to "unstick" it - that closes the connection in the same way.
 
 ### Never use `DoCommand "Insert..."` to add controls to windows
 
