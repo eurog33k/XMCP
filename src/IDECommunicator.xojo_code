@@ -97,7 +97,11 @@ Protected Class IDECommunicator
 		  // behind that one and give up on it too. Say so instead; DrainPending notices
 		  // when the IDE has caught up and the next call goes through normally.
 		  If DrainPending > 0 Then
-		    LastErrorMessage = "The Xojo IDE is still executing an earlier request and has not answered it yet:" + _
+		    // "Has not finished answering", not "has not answered": for 250ms after the IDE's answer
+		    // starts arriving, XMCP is still collecting it (see PendingRequest.ReplyComplete) and the
+		    // request is still held, so a new one is still turned down - correctly, but saying the IDE
+		    // "has not answered" would then be untrue.
+		    LastErrorMessage = "The Xojo IDE is still busy with an earlier request and has not finished answering it:" + _
 		    EndOfLine + PendingSummary + EndOfLine + _
 		    "No new request was sent. A build blocks the IDE until it finishes; wait for it, then try again. " + _
 		    "Do not quit or restart Claude Code (or whichever MCP client you use) meanwhile: on macOS " + _

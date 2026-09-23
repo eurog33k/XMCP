@@ -73,7 +73,7 @@ Inherits MCPKit.Tool
 		    ElseIf windowsBefore < 1 Then
 		      // Say why it could not be read when the IDE told us. The usual reason now is the
 		      // refusal that arrives while an earlier request is still parked, and "the IDE is
-		      // still executing an earlier request" is a far more useful thing to read than a
+		      // still busy with an earlier request" is a far more useful thing to read than a
 		      // generic warning about quitting the IDE.
 		      Var why As String = App.IDE.LastErrorMessage
 		      If why <> "" Then

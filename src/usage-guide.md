@@ -417,6 +417,19 @@ and a diagnostic appended to it would corrupt it; they mention a warning only wh
 script printed nothing. `debug_control` and `stop_project` report success even when no
 debug session is running - confirm the state another way.
 
+### Every IDE tool has a time limit, and running past it is not a failure
+
+Each tool waits a limited time for the IDE: 10 seconds for `run_ide_script` and most tools,
+five minutes for `analyze_project`, 30 minutes for `build_project` and `run_project`. All
+four of those take a `timeout` argument in milliseconds to change it (a zero or negative
+value means "use the default").
+
+When a request runs past its limit, the IDE is not stopped - it carries on and finishes
+the work - but XMCP stops waiting for the answer and keeps the connection open until it
+arrives (it is *parked*). So a timeout does not mean the build failed, and it does mean the
+next rule below applies. If you know a build or analysis will be long, pass a larger
+`timeout` up front instead of letting it run over.
+
 ### While the IDE is still answering a request, do not quit or restart the client
 
 When a request takes longer than its time limit - a long build, or a dialog waiting for a
@@ -539,8 +552,9 @@ Use `analyze_project` to catch errors and warnings without triggering a full bui
 
 - **`scope="project"`** (default) — analyzes the entire project. Use before a build.
 - **`scope="item"`** — analyzes only the currently selected item. Use for a fast check on the item you just edited.
+- **`timeout`** — how long to wait, in milliseconds (default 300000, five minutes). Raise it for a large project.
 
-Warnings return as success (they don't block building). Errors return as failure with a formatted list identical to `build_project` output.
+Warnings return as success (they don't block building). Errors return as failure. Each error line is formatted exactly as `build_project` formats it, but the heading reads "Analysis results (N error(s), M warning(s)):" rather than "Build errors (N):", since no build takes place.
 
 **Recommended pre-build workflow:**
 1. Edit code (direct file edit or `set_code`)
@@ -564,7 +578,7 @@ When a debug session is active (started with `run_project`) and the app is pause
 
 ### build_project uses the IDE's Build Settings
 
-`build_project` takes no parameters — it builds using whatever target platforms the user has configured in the IDE's Build Settings (`BuildMac`, `BuildWin32`, etc.). On success it returns "Build succeeded."; on failure it returns the list of build errors. The success message does not include a path, so to confirm the build location, check the project's `Builds - <ProjectName>/` directory.
+`build_project` takes one optional parameter, `timeout` (see below); which platforms it builds for is not a parameter — it builds using whatever target platforms the user has configured in the IDE's Build Settings (`BuildMac`, `BuildWin32`, etc.). On success it returns "Build succeeded."; on failure it returns the list of build errors. The success message does not include a path, so to confirm the build location, check the project's `Builds - <ProjectName>/` directory.
 
 ### Debug mode vs. built app — exception visibility
 

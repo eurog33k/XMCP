@@ -33,7 +33,7 @@ MCP Client (stdin/stdout JSON-RPC)
 
 **`App.xojo_code`** — Entry point. Registers all 28 tools in `Configure()`, auto-detects the Xojo documentation path under `~/Library/Application Support/Xojo/`, initializes `IDECommunicator` and optionally `SemanticSearch`. The global `App.IDE` instance is used by all IDE tools; `App.SemanticSearch` is used by `SearchDocs` when available.
 
-**`IDECommunicator.xojo_code`** — Handles all IDE socket communication. Uses IDE Communicator Protocol v2 over a Unix domain socket (`/tmp/XojoIDE` or `/private/tmp/XojoIDE`). Messages are NUL-terminated JSON. Sends a `{"protocol": 2}` handshake, then uses tag-based correlation for synchronous request/response. Default timeout is 10 seconds; builds use 120 seconds.
+**`IDECommunicator.xojo_code`** — Handles all IDE socket communication. Uses IDE Communicator Protocol v2 over a Unix domain socket (`/tmp/XojoIDE` or `/private/tmp/XojoIDE`). Messages are NUL-terminated JSON. Sends a `{"protocol": 2}` handshake, then uses tag-based correlation for synchronous request/response. Each tool has its own time limit, changeable with a `timeout` argument where the tool takes one: 10 seconds for `run_ide_script` and the tools that go through `RunScript`, 5 minutes for `analyze_project`, 30 minutes for `build_project` and `run_project`. A request that runs past its limit is not failed and not resent: XMCP keeps the connection open until the IDE answers ("parked") - see Development Notes for why the client must not be quit meanwhile.
 
 **`MCPKit/`** — The MCP protocol framework (8 classes):
 - `ServerApplication` — JSON-RPC stdin/stdout loop, tool dispatch, and MCP resources handling (`resources/list` / `resources/read`)

@@ -6,7 +6,7 @@ XMCP connects to the Xojo IDE via its IPC socket, all through the standard MCP p
 
 ## What XMCP can do
 
-34 tools in total (31 always on, 3 opt-in) across seven categories — see [Tools](#tools) below for the full reference on each one:
+34 tools in total on macOS and 33 on Windows (31 and 30 always on, plus 3 opt-in; `get_system_log` reads the macOS system log and is not registered on Windows) across seven categories — see [Tools](#tools) below for the full reference on each one:
 
 - **IDE Tools** (19) — navigate, read/write code, build, run, save, analyze, control debug sessions, create items, inspect/modify item descriptions and constants, revert from disk, and run arbitrary IDE scripts
 - **Documentation Tools** (4) — search Xojo's bundled documentation and the user's personal notes, look up class references, list topics
@@ -206,15 +206,19 @@ Replaces the currently selected text in the code editor with new text.
 
 #### `build_project`
 
-Builds the current Xojo project using the IDE's configured Build Settings (the target platforms selected in the IDE). Uses a 120-second timeout for long builds. Returns "Build succeeded." on success, or a formatted list of build errors on failure.
+Builds the current Xojo project using the IDE's configured Build Settings (the target platforms selected in the IDE). Returns "Build succeeded." on success, or a formatted list of build errors on failure.
 
-*No parameters.*
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `timeout` | Integer | No | How long to wait for the build, in milliseconds. Default: 1800000 (30 minutes); zero or negative means the default. Giving up does not stop the IDE: if it takes longer, the request is left waiting (*parked*) until the IDE answers, and you must not quit or restart Claude Code in the meantime - see [When the IDE does not answer](#when-the-ide-does-not-answer). If you expect a long build, pass a longer `timeout` rather than letting it run over. |
 
 #### `run_project`
 
 Runs the current Xojo project in debug mode.
 
-*No parameters.*
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `timeout` | Integer | No | How long to wait for the project to build and launch, in milliseconds. Default: 1800000 (30 minutes); zero or negative means the default. Giving up does not stop the IDE: if it takes longer, the request is left waiting (*parked*) until the IDE answers, and you must not quit or restart Claude Code in the meantime - see [When the IDE does not answer](#when-the-ide-does-not-answer). If you expect a long build before it launches, pass a longer `timeout` rather than letting it run over. |
 
 #### `stop_project`
 
@@ -238,7 +242,7 @@ Executes an arbitrary Xojo IDE script. This is an escape hatch for any IDE scrip
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `script` | String | Yes | The IDE script code to execute. Use `Print` to return output values. |
-| `timeout` | Integer | No | Timeout in milliseconds. Default: 10000 (10 seconds). |
+| `timeout` | Integer | No | How long to wait for the script, in milliseconds. Default: 10000 (10 seconds); zero or negative means the default. Giving up does not stop the IDE: if the script runs longer - or opens a dialog - the request is left waiting (*parked*) until the IDE answers, and you must not quit or restart Claude Code in the meantime - see [When the IDE does not answer](#when-the-ide-does-not-answer). |
 
 #### `get_project_info`
 
@@ -283,6 +287,7 @@ Analyzes the current Xojo project for compile errors and warnings without buildi
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `scope` | String | No | `"project"` (default) — analyze entire project; `"item"` — analyze only the currently selected item. |
+| `timeout` | Integer | No | How long to wait for the analysis, in milliseconds. Default: 300000 (5 minutes); zero or negative means the default. A large project can take longer than the fixed 60 seconds this used to allow. Giving up does not stop the IDE: if it takes longer, the request is left waiting (*parked*) until the IDE answers, and you must not quit or restart Claude Code in the meantime - see [When the IDE does not answer](#when-the-ide-does-not-answer). If you expect a long analysis, pass a longer `timeout` rather than letting it run over. |
 
 #### `debug_control`
 
