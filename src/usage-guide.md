@@ -405,8 +405,9 @@ add a trailing `Print` yourself. Some commands genuinely have no value to give -
 failure: verify the effect in a separate call.
 
 Structured tools that go through the same IDE communication (`list_project_items`,
-`debug_control`, `constant_value`) normalise an empty reply internally, so an
-empty-looking result from them means the value genuinely is empty. Because the IDE
+`constant_value`) normalise an empty reply internally, so an empty-looking result from
+them means the value genuinely is empty. (`debug_control` is the exception: it turns an
+empty reply into a success message - see below.) Because the IDE
 collapses a `Print` of only spaces, `constant_value` cannot return a constant whose
 value is nothing but whitespace - it reads as empty.
 
