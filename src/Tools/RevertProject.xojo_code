@@ -65,6 +65,8 @@ Inherits MCPKit.Tool
 		      Call App.IDE.SendAndReceive("NewConsoleProject" + EndOfLine + "Print ""created""", 30000)
 
 		      If WindowCountFromIDE <= windowsBefore Then
+		        Var waiting As MCPKit.ToolResult = StillWaiting("opening a second workspace window", False, target.NativePath)
+		        If waiting <> Nil Then Return waiting
 		        Return MCPKit.ToolResult.Failure("Could not open a second workspace window, which is " + _
 		        "needed because closing the last project would quit the IDE on Windows. Nothing was " + _
 		        "changed. Reload the project manually instead.")
@@ -86,6 +88,8 @@ Inherits MCPKit.Tool
 
 		    // 3. Focus the target, then close it. The extra window keeps the IDE running.
 		    If Not OpenAndVerify(target) Then
+		      Var waitingFocus As MCPKit.ToolResult = StillWaiting("bringing the project to the front", False, target.NativePath)
+		      If waitingFocus <> Nil Then Return waitingFocus
 		      If hostCreated Then Call CloseUnsavedWindow
 		      Return MCPKit.ToolResult.Failure("Could not focus the project before closing it. " + _
 		      "Nothing was changed. Reload the project manually instead.")
@@ -95,6 +99,8 @@ Inherits MCPKit.Tool
 
 		    Var afterClose As String = ProjectPathFromIDE(reachable)
 		    If Not reachable Then
+		      Var waitingClose As MCPKit.ToolResult = StillWaiting("closing the project", True, target.NativePath)
+		      If waitingClose <> Nil Then Return waitingClose
 		      Return MCPKit.ToolResult.Failure("The Xojo IDE stopped responding while closing the " + _
 		      "project: " + App.IDE.LastErrorMessage + " Reopen the project manually: " + target.NativePath)
 		    End If
@@ -106,6 +112,8 @@ Inherits MCPKit.Tool
 
 		    // 4. Reopen the target from disk.
 		    If Not OpenAndVerify(target) Then
+		      Var waitingOpen As MCPKit.ToolResult = StillWaiting("reopening the project", True, target.NativePath)
+		      If waitingOpen <> Nil Then Return waitingOpen
 		      Return MCPKit.ToolResult.Failure("The project was closed but did not reopen. Another " + _
 		      "workspace window is still open, so the IDE is still running. Reopen the project " + _
 		      "manually: " + target.NativePath)
@@ -154,6 +162,8 @@ Inherits MCPKit.Tool
 		    End If
 
 		    If Not reachable Then
+		      Var waitingClose As MCPKit.ToolResult = StillWaiting("closing the project", True, nativePath)
+		      If waitingClose <> Nil Then Return waitingClose
 		      Return MCPKit.ToolResult.Failure("The Xojo IDE stopped responding after the project " + _
 		      "was closed: " + App.IDE.LastErrorMessage + " Reopen the project manually: " + nativePath)
 		    End If
@@ -163,6 +173,8 @@ Inherits MCPKit.Tool
 		    "OpenFile """ + nativePath + """" + EndOfLine + "Print ""reopened""", 30000)
 
 		    If Not SamePath(ProjectPathFromIDE(reachable), target) Then
+		      Var waitingOpen As MCPKit.ToolResult = StillWaiting("reopening the project", True, nativePath)
+		      If waitingOpen <> Nil Then Return waitingOpen
 		      Var detail As String = ""
 		      If openResponse = Nil Then
 		        detail = App.IDE.LastErrorMessage
@@ -292,6 +304,37 @@ Inherits MCPKit.Tool
 
 		  Return reported.NativePath = expected.NativePath
 
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function StillWaiting(stepName As String, projectClosed As Boolean, projectPath As String) As MCPKit.ToolResult
+		  /// Nil, unless one of this tool's own requests is still waiting for the IDE - then the
+		  /// message that says so, in place of a misleading one.
+		  ///
+		  /// Several steps here send a request and ignore its reply, then check the effect with a
+		  /// second call. If the first request is still being carried out when its wait runs out -
+		  /// a slow close, a dialog - it is left waiting, and the second call is turned down. The
+		  /// check used to read that as the step having failed ("stopped responding", "did not
+		  /// reopen") when the IDE was in fact still doing it. Asking whether a request is still
+		  /// waiting tells the two apart.
+		  
+		  If App.IDE = Nil Or App.IDE.DrainPending = 0 Then Return Nil
+		  
+		  Var what As String
+		  If projectClosed Then
+		    what = "The project may already be closed. When the IDE has finished, check whether it is open, " + _
+		    "and reopen it manually if it is not: " + projectPath
+		  Else
+		    what = "Nothing has been changed yet: the project has not been closed. When the IDE has finished, " + _
+		    "run revert_project again."
+		  End If
+		  
+		  Return MCPKit.ToolResult.Failure("The Xojo IDE has not finished " + stepName + " yet. It is still " + _
+		  "working on it, so further requests are turned down until it answers - nothing has failed so far. " + _
+		  "Wait for it, or click any dialog it is showing. " + what + EndOfLine + EndOfLine + _
+		  "Do not quit or restart Claude Code (or whichever MCP client you use) meanwhile: on macOS and " + _
+		  "Linux the Xojo IDE crashes if it answers over a connection that has been closed.")
 		End Function
 	#tag EndMethod
 

@@ -135,9 +135,17 @@ Protected Class IDECommunicator
 		  // An empty or whitespace-only script gets the sentinel as well. Without it such a
 		  // script reaches the IDE with no Print, is never answered, and parks. Tools guard
 		  // against sending one, but the guarantee belongs here, where no caller can skip it.
+		  //
+		  // The sentinel prints a marker unique to this request rather than an empty string, so
+		  // that its arrival can be recognised: it is the script's last line, the IDE sends one
+		  // reply per Print in order, so once the marker is in, the answer is complete - apart from
+		  // a compiler warning, which the IDE sends after the last Print (measured on 2026r2.1:
+		  // 0.3-0.6 ms later on macOS, 0.03-0.35 ms on Windows). The collection loop therefore
+		  // waits kAfterEndMarkerMS after the marker instead of the full kSplitReplyWindowMS, and
+		  // never hands the marker itself to a caller. See IsEndMarker.
 		  Var sent As String = script
 		  If Not EndsWithLineContinuation(script) Then
-		    sent = script + EndOfLine + "Print """""
+		    sent = script + EndOfLine + "Print """ + EndMarker(tag) + """"
 		  End If
 		  
 		  Var req As New JSONItem
@@ -415,6 +423,40 @@ Protected Class IDECommunicator
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
+		Private Function EmptyReply(tag As String) As JSONItem
+		  /// The reply the IDE sends for a script that printed an empty string - an empty object -
+		  /// built here for a script whose only reply was the end marker, which callers never see.
+		  
+		  Var envelope As New JSONItem
+		  envelope.Value("tag") = tag
+		  envelope.Value("response") = New JSONItem
+		  Return envelope
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function EndMarker(tag As String) As String
+		  /// The text the sentinel Print outputs for this request. Unique per request because the tag
+		  /// is, so a stale reply for another request can never be taken for this one's end.
+		  
+		  Return kEndMarkerPrefix + tag
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function IsEndMarker(envelope As JSONItem, tag As String) As Boolean
+		  /// True when this reply part is the sentinel's own output rather than anything the script
+		  /// printed. Compared exactly and case-sensitively: = on strings ignores case in Xojo, and a
+		  /// loose match here would swallow a line of the caller's own output.
+		  
+		  If envelope = Nil Or Not envelope.HasKey("response") Then Return False
+		  Var resp As Variant = envelope.Value("response")
+		  If resp.Type <> Variant.TypeString Then Return False
+		  Return resp.StringValue.Compare(EndMarker(tag), ComparisonOptions.CaseSensitive) = 0
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
 		Private Sub LogVerbose(message As String)
 		  If App <> Nil And App.Verbose Then
 		    System.DebugLog(message)
@@ -532,6 +574,7 @@ Protected Class IDECommunicator
 		  // answered (see below), so the late output still lands safely.
 		  Var frames() As JSONItem
 		  Var collectUntilUS As Double = deadlineUS
+		  Var sawEndMarker As Boolean = False
 		  
 		  While System.Microseconds < deadlineUS And System.Microseconds < collectUntilUS
 		    // Guarded like Connect and Write above, and like DrainPending's own Poll. The write
@@ -567,9 +610,19 @@ Protected Class IDECommunicator
 		      Try
 		        Var response As New JSONItem(frame)
 		        If response.HasKey("tag") And response.Value("tag").StringValue = tag Then
-		          frames.Add(response)
-		          If frames.Count = 1 Then
-		            collectUntilUS = System.Microseconds + (kSplitReplyWindowMS * 1000.0)
+		          If IsEndMarker(response, tag) Then
+		            // The script has run to its last line. Only a trailing compiler warning can
+		            // still come, within a millisecond, so shorten the wait - never lengthen it.
+		            sawEndMarker = True
+		            Var graceUS As Double = System.Microseconds + (kAfterEndMarkerMS * 1000.0)
+		            If graceUS < collectUntilUS Then collectUntilUS = graceUS
+		          Else
+		            frames.Add(response)
+		            // The full window starts at the first part - unless the marker is already in,
+		            // in which case this is the trailing warning and must not restart the wait.
+		            If frames.Count = 1 And Not sawEndMarker Then
+		              collectUntilUS = System.Microseconds + (kSplitReplyWindowMS * 1000.0)
+		            End If
 		          End If
 		        Else
 		          LogVerbose("IDE request " + tag + ": ignoring a frame for another tag (stale or unsolicited).")
@@ -584,7 +637,19 @@ Protected Class IDECommunicator
 		    Wend
 		  Wend
 		  
-		  // Warnings and nothing else means the script is still running: every caller sends
+		  // The end marker arrived, so the script ran to its last line and its answer is complete.
+		  // That holds even when the parts are only warnings, or when there are none at all -
+		  // neither is "still running" any more, so neither waits. A script that printed nothing
+		  // gets the empty reply the IDE would have sent for Print "", which is what every caller
+		  // already understands as "no value".
+		  If sawEndMarker Then
+		    sock.Close
+		    LastErrorMessage = ""
+		    If frames.Count = 0 Then Return EmptyReply(tag)
+		    Return MergeReply(frames)
+		  End If
+		  
+		  // No marker. Warnings and nothing else means the script is still running: every caller sends
 		  // a script that ends in a Print, so an output frame is always coming eventually.
 		  // Answering with the warning here would pick the wrong part AND close the socket
 		  // on a reply still in flight - the two failures this class exists to avoid. Fall
@@ -1062,6 +1127,12 @@ Protected Class IDECommunicator
 	#tag Constant, Name = kNoListenerPrefix, Type = String, Dynamic = False, Default = \"IPC socket not found", Scope = Private
 	#tag EndConstant
 	
+	#tag Constant, Name = kAfterEndMarkerMS, Type = Double, Dynamic = False, Default = \"50", Scope = Private
+	#tag EndConstant
+
+	#tag Constant, Name = kEndMarkerPrefix, Type = String, Dynamic = False, Default = \"xmcp-end:", Scope = Private
+	#tag EndConstant
+
 	#tag Constant, Name = kSplitReplyWindowMS, Type = Double, Dynamic = False, Default = \"250", Scope = Private, Description = 486F77206C6F6E6720746F206B6565702072656164696E6720666F72206D6F726520706172747320616674657220746865206669727374206D61746368696E67207265706C79206672616D652C20696E206D696C6C697365636F6E64732E
 	#tag EndConstant
 	
