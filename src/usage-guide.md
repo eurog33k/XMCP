@@ -418,6 +418,10 @@ and a diagnostic appended to it would corrupt it; they mention a warning only wh
 script printed nothing. `debug_control` and `stop_project` report success even when no
 debug session is running - confirm the state another way.
 
+A runtime error in a script comes back without detail: the Xojo IDE gives no message and
+no line number, so XMCP can only say that the script stopped with a runtime error. To find
+where, split the script, or `Print` intermediate values before the line you suspect.
+
 ### Every IDE tool has a time limit, and running past it is not a failure
 
 Each tool waits a limited time for the IDE: 10 seconds for `run_ide_script` and most tools,

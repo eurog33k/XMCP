@@ -435,6 +435,18 @@ Protected Class IDECommunicator
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
+		Private Function EmptyMessageExplanation(kind As String) As String
+		  /// What to show when the IDE reports an error or warning without any message.
+		  
+		  If kind.Lowercase.EndsWith("runtimeerror") Then
+		    Return "the script stopped with a runtime error, and the Xojo IDE gave no message and no line " + _
+		    "number for it. Typical causes are an array index out of range or a Nil object."
+		  End If
+		  Return "the Xojo IDE gave no message for this."
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
 		Private Function EndMarker(tag As String) As String
 		  /// The text the sentinel Print outputs for this request. Unique per request because the tag
 		  /// is, so a stale reply for another request can never be taken for this one's end.
@@ -900,7 +912,12 @@ Protected Class IDECommunicator
 		    If isWarning <> warningsOnly Then Continue
 		    
 		    Var text As String = If(kind = "", If(warningsOnly, "Warning", "Error"), kind)
-		    If entry.HasKey("message") Then text = text + ": " + entry.Value("message").StringValue
+		    // The IDE sends a runtime error with an empty message and line 0 - measured on 2026r2.1
+		    // on macOS and Windows - which used to come out as "scriptRuntimeError:" and nothing
+		    // else. Say what an empty message means instead of printing a bare colon.
+		    Var message As String = If(entry.HasKey("message"), entry.Value("message").StringValue, "")
+		    If message.Trim = "" Then message = EmptyMessageExplanation(kind)
+		    text = text + ": " + message
 		    If entry.HasKey("line") Then
 		      Var line As Integer = entry.Value("line").IntegerValue
 		      If line >= 2 Then line = line - 1
