@@ -522,8 +522,21 @@ Protected Class IDECommunicator
 		  If connectTimeoutMS > kConnectTimeoutMS Then connectTimeoutMS = kConnectTimeoutMS
 		  Var connectDeadlineUS As Double = System.Microseconds + (connectTimeoutMS * 1000.0)
 		  
+		  // Poll is guarded like Connect above, and handled the same way: a failure here is a
+		  // failed connect. Nothing has been written yet, so closing the socket is safe and the
+		  // request can never have reached the IDE.
 		  While Not sock.IsConnected And System.Microseconds < connectDeadlineUS
-		    sock.Poll
+		    Try
+		      sock.Poll
+		    Catch e As RuntimeException
+		      sock.Close
+		      #If TargetWindows Then
+		        LastErrorMessage = kNoListenerPrefix + " at " + candidatePath + ": " + e.Message
+		      #Else
+		        LastErrorMessage = "IPCSocket connect failed for " + candidatePath + ": " + e.Message
+		      #EndIf
+		      Return Nil
+		    End Try
 		    App.SleepCurrentThread(5)
 		  Wend
 		  
