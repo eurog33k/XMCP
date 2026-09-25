@@ -1,29 +1,37 @@
 #tag Class
 Protected Class PendingRequest
 	#tag Method, Flags = &h0
-		Sub Constructor(replySocket As IPCSocket, requestTag As String, requestScript As String)
+		Sub Constructor(replySocket As IPCSocket, requestTag As String, requestScript As String, endMarkerExpected As Boolean)
 		  Sock = replySocket
 		  Tag = requestTag
 		  Script = requestScript
+		  MarkerExpected = endMarkerExpected
 		  SinceUS = System.Microseconds
 		  LastDataUS = System.Microseconds
 		End Sub
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
-		Function ReplyComplete() As Boolean
-		  /// Takes whatever the IDE has written so far and reports whether a whole reply
-		  /// frame has arrived. The caller polls the socket first.
+		Function ReplyComplete(owner As IDECommunicator) As Boolean
+		  /// Takes whatever the IDE has written so far and reports whether this request's answer
+		  /// is complete, so its socket can be closed. The caller polls the socket first.
 		  ///
-		  /// The IDE frames its messages as NUL-terminated JSON, and on Windows the transport
-		  /// is TCP, which splits a large reply across segments as a matter of course. Treating
-		  /// the first byte as "the IDE has finished" would close the socket while the IDE may
-		  /// still be writing the rest - and a write into a closed peer is the SIGPIPE that
-		  /// parking exists to avoid, so releasing early reintroduces the crash by the back
-		  /// door. Only a NUL means the reply is whole.
+		  /// Decided by the same rule as the live reader in IDECommunicator, with the same
+		  /// tests (owner.IsEndMarker, owner.StopsScript): the answer is complete when its end
+		  /// marker has arrived, or a compile or runtime error that stopped the script. A part
+		  /// followed by a quiet spell is not enough. The IDE sends each Print the moment it runs,
+		  /// so a script that prints, then waits on a build or a dialog, then prints again goes
+		  /// quiet in between - and closing then is the SIGPIPE parking exists to prevent: the
+		  /// IDE writes the rest into a closed peer. Parts for another tag say nothing about this
+		  /// request and are ignored.
 		  ///
-		  /// The bytes are kept only to find that terminator. Nobody reads them: the caller
-		  /// gave up on this request long ago and the reply is discarded on release.
+		  /// A script that ends in a line continuation has no marker appended, so for it any part
+		  /// of its own ends the answer, as before. On top of either, the connection must have
+		  /// been quiet for kQuietAfterFrameMS, so that a trailing warning is in before the close.
+		  ///
+		  /// Parts are NUL-terminated JSON; on Windows the transport is TCP, which splits a large
+		  /// part across reads, so only whole parts are looked at and a partial one stays in the
+		  /// buffer. What the parts say is discarded: the caller gave up on this request long ago.
 		  
 		  Var chunk As String = Sock.ReadAll
 		  If chunk <> "" Then
@@ -31,14 +39,26 @@ Protected Class PendingRequest
 		    LastDataUS = System.Microseconds
 		  End If
 		  
-		  If Buffer.IndexOf(Chr(0)) < 0 Then Return False
+		  Var nulPos As Integer = Buffer.IndexOf(Chr(0))
+		  While nulPos >= 0
+		    Var frame As String = Buffer.Left(nulPos).Trim
+		    Buffer = Buffer.Middle(nulPos + 1)
+		    nulPos = Buffer.IndexOf(Chr(0))
+		    If frame = "" Then Continue
+		    
+		    Try
+		      Var response As New JSONItem(frame)
+		      If response.HasKey("tag") And response.Value("tag").StringValue = Tag Then
+		        If Not MarkerExpected Or owner.IsEndMarker(response, Tag) Or owner.StopsScript(response) Then
+		          AnswerEnded = True
+		        End If
+		      End If
+		    Catch e As RuntimeException
+		      // A part that cannot be read is skipped, as in the live reader.
+		    End Try
+		  Wend
 		  
-		  // A whole frame has arrived - but one reply can be several frames, which is the
-		  // premise the live reader is built on: it keeps reading for kSplitReplyWindowMS after
-		  // the first matching frame rather than answering on it. This path had no equivalent,
-		  // so it released on frame one and closed the socket while the IDE could still be
-		  // writing frame two - the same SIGPIPE, on the other path. Wait for the connection to
-		  // fall quiet before calling the reply finished.
+		  If Not AnswerEnded Then Return False
 		  Return System.Microseconds - LastDataUS >= kQuietAfterFrameMS * 1000.0
 		End Function
 	#tag EndMethod
@@ -60,11 +80,19 @@ Protected Class PendingRequest
 
 
 	#tag Property, Flags = &h0
+		AnswerEnded As Boolean
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
 		Buffer As String
 	#tag EndProperty
 
 	#tag Property, Flags = &h0
 		LastDataUS As Double
+	#tag EndProperty
+
+	#tag Property, Flags = &h0
+		MarkerExpected As Boolean
 	#tag EndProperty
 
 	#tag Property, Flags = &h0

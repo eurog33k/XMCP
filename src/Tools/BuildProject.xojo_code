@@ -72,19 +72,21 @@ Inherits MCPKit.Tool
 	#tag Method, Flags = &h21
 		Private Function ParseDoCommandResult(resultJSON As JSONItem) As MCPKit.ToolResult
 		  /// Parses the JSON returned by DoCommand "BuildApp".
-		  /// Success: empty {} -> "Build succeeded."
+		  /// Success: nothing to report ({}, or a buildError with empty lists) -> "Build succeeded."
 		  /// Failure: buildError, missingFiles, openErrors or loadError - all of them, via the
 		  /// shared classifier in IDECommunicator, so every tool reports them the same way. The
 		  /// hand-rolled parse this replaces read buildError.errors only and reported the other
 		  /// three shapes as a raw JSON dump under "Build failed:".
 		  
-		  If resultJSON.Count = 0 Then
-		    Return MCPKit.ToolResult.Success("Build succeeded.")
-		  End If
-		  
 		  // Wrap the object the way the IDE delivers it so the classifier can read it.
 		  Var envelope As New JSONItem
 		  envelope.Value("response") = resultJSON
+		  
+		  // Nothing to report is success: {} as well as a buildError whose lists are empty. The
+		  // classifier decides it, so this tool and analyze_project cannot disagree about it.
+		  If App.IDE.ReplyKind(envelope) = "empty" Then
+		    Return MCPKit.ToolResult.Success("Build succeeded.")
+		  End If
 		  
 		  Var diagnostics As String = App.IDE.ReplyDiagnostics(envelope)
 		  If diagnostics <> "" Then

@@ -455,16 +455,41 @@ Protected Class IDECommunicator
 		End Function
 	#tag EndMethod
 
-	#tag Method, Flags = &h21
-		Private Function IsEndMarker(envelope As JSONItem, tag As String) As Boolean
+	#tag Method, Flags = &h0
+		Function IsEndMarker(envelope As JSONItem, tag As String) As Boolean
 		  /// True when this reply part is the sentinel's own output rather than anything the script
 		  /// printed. Compared exactly and case-sensitively: = on strings ignores case in Xojo, and a
 		  /// loose match here would swallow a line of the caller's own output.
-		  
+		  ///
+		  /// Public because PendingRequest decides the same question for a parked request, and it
+		  /// must decide it the same way.
+
 		  If envelope = Nil Or Not envelope.HasKey("response") Then Return False
 		  Var resp As Variant = envelope.Value("response")
 		  If resp.Type <> Variant.TypeString Then Return False
 		  Return resp.StringValue.Compare(EndMarker(tag), ComparisonOptions.CaseSensitive) = 0
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
+		Function StopsScript(envelope As JSONItem) As Boolean
+		  /// True when this reply part is a compile or runtime error. The IDE stops the script
+		  /// there, so nothing more follows - no further output and no end marker - and the
+		  /// answer is complete. Measured on 2026r2.1: a runtime error and any warning arrive
+		  /// together in this one part.
+		  ///
+		  /// A buildError is not one: DoCommand "BuildApp" returns it as a value and the script
+		  /// carries on to its next line, so the end marker still comes.
+		  ///
+		  /// Public for the same reason as IsEndMarker.
+
+		  If ReplyKind(envelope) <> "error" Then Return False
+		  Try
+		    Var obj As JSONItem = envelope.Value("response")
+		    Return obj <> Nil And obj.HasKey("scriptError")
+		  Catch e As RuntimeException
+		    Return False
+		  End Try
 		End Function
 	#tag EndMethod
 
@@ -585,38 +610,58 @@ Protected Class IDECommunicator
 		  Var buffer As String = ""
 		  Var hadData As Boolean = False
 		  
-		  // One reply can arrive as several messages under the same tag: a script's Print
-		  // output and a compiler warning about it arrive together, and an analysis returns
-		  // its buildError and the Print sentinel together. Returning on the first frame made
-		  // the answer whichever part won the race. After the first matching frame the loop
-		  // keeps reading for a short window and MergeReply folds the parts.
+		  // One answer arrives as several parts under the same tag - one per Print, then a
+		  // compiler warning about the script, if any - and the IDE sends each part the moment
+		  // it is produced. Measured on 2026r2.1: a Print, 232 ms of work, then a second Print
+		  // arrived 232 ms apart; with a build or a dialog in between, parts are minutes apart.
+		  // So a gap between parts says nothing about whether the answer is finished, and
+		  // closing the socket on a gap is the SIGPIPE this class exists to prevent: the IDE
+		  // writes the rest into a closed peer.
 		  //
-		  // A warning gets no special window. An earlier version waited far longer when the
-		  // first frame was a warning, on the assumption that the output was still to come -
-		  // an assumption we could not reproduce: measured against the IDE socket on 2025r3.1
-		  // and 2026r2.1, the warning always arrived with the output, never ahead of it. If a
-		  // reply ever does turn out to be warnings-only, the socket is parked rather than
-		  // answered (see below), so the late output still lands safely.
+		  // What does say it is finished:
+		  // - the end marker, the script's own last line (see SendAndReceive). After it only a
+		  //   compiler warning can follow, within a millisecond, so kAfterEndMarkerMS is waited
+		  //   for that, then the answer is complete;
+		  // - a compile or runtime error (StopsScript): the IDE stops the script there, so no
+		  //   marker will come;
+		  // - nothing else, when no marker was appended - a script that ends in a line
+		  //   continuation. Such a script cannot compile, so its answer is a compile error in
+		  //   practice; the old rule, a window after the first part, is kept for it anyway.
+		  // Without one of those by the deadline the script is still running, and the request
+		  // parks. The same rule decides when a parked request is finished (PendingRequest).
+		  Var markerExpected As Boolean = Not EndsWithLineContinuation(script)
 		  Var frames() As JSONItem
 		  Var collectUntilUS As Double = deadlineUS
 		  Var sawEndMarker As Boolean = False
+		  Var sawScriptStop As Boolean = False
+		  Var windowStarted As Boolean = False
+		  Var ideClosed As Boolean = False
 		  
-		  While System.Microseconds < deadlineUS And System.Microseconds < collectUntilUS
+		  // Once the marker is in, the short wait after it may run past the deadline: the answer
+		  // has arrived, and cutting that wait short would close the socket just before the
+		  // trailing warning is written into it. It is bounded by kAfterEndMarkerMS.
+		  While (System.Microseconds < deadlineUS Or sawEndMarker) And System.Microseconds < collectUntilUS
 		    // Guarded like Connect and Write above, and like DrainPending's own Poll. The write
 		    // has already succeeded here, so the IDE may be executing the script; an exception
-		    // escaping would skip both the merge below and the parking below it, leaking an
-		    // open socket and losing the guarantee that a delivered script is never resent.
-		    // Stop reading and let it park - DrainPending will fail the same way and release it.
+		    // escaping would skip both the answer and the parking below, leaking an open socket
+		    // and losing the guarantee that a delivered script is never resent. Stop reading;
+		    // what has arrived decides below whether the answer is complete or the request parks.
 		    Var chunk As String
 		    Try
 		      sock.Poll
 		      chunk = sock.ReadAll
 		    Catch e As RuntimeException
-		      LogVerbose("IDE request " + tag + ": polling failed (" + e.Message + "); parking it.")
+		      LogVerbose("IDE request " + tag + ": polling failed (" + e.Message + ").")
 		      Exit
 		    End Try
 
 		    If chunk = "" Then
+		      // The IDE closed the connection: nothing more can arrive, so waiting out the rest of
+		      // the deadline - up to 30 minutes for a build - would only delay the same outcome.
+		      If Not sock.IsConnected Then
+		        ideClosed = True
+		        Exit
+		      End If
 		      App.SleepCurrentThread(5)
 		      Continue
 		    End If
@@ -636,16 +681,14 @@ Protected Class IDECommunicator
 		        Var response As New JSONItem(frame)
 		        If response.HasKey("tag") And response.Value("tag").StringValue = tag Then
 		          If IsEndMarker(response, tag) Then
-		            // The script has run to its last line. Only a trailing compiler warning can
-		            // still come, within a millisecond, so shorten the wait - never lengthen it.
 		            sawEndMarker = True
-		            Var graceUS As Double = System.Microseconds + (kAfterEndMarkerMS * 1000.0)
-		            If graceUS < collectUntilUS Then collectUntilUS = graceUS
+		            collectUntilUS = System.Microseconds + (kAfterEndMarkerMS * 1000.0)
 		          Else
 		            frames.Add(response)
-		            // The full window starts at the first part - unless the marker is already in,
-		            // in which case this is the trailing warning and must not restart the wait.
-		            If frames.Count = 1 And Not sawEndMarker Then
+		            If StopsScript(response) Then sawScriptStop = True
+		            // Only where no marker is coming does a window after a part end the wait.
+		            If Not sawEndMarker And Not windowStarted And (sawScriptStop Or Not markerExpected) Then
+		              windowStarted = True
 		              collectUntilUS = System.Microseconds + (kSplitReplyWindowMS * 1000.0)
 		            End If
 		          End If
@@ -654,7 +697,7 @@ Protected Class IDECommunicator
 		        End If
 		      Catch e As RuntimeException
 		        // Any exception, not only JSONException. The write has already succeeded here, so
-		        // one escaping - a tag that is not a string, say - would skip both the merge and
+		        // one escaping - a tag that is not a string, say - would skip both the answer and
 		        // the parking below, leaving an open socket that is neither answered nor parked.
 		        // A frame that cannot be read is skipped, like a malformed one always was.
 		        LogVerbose("IDE request " + tag + ": skipped an unreadable frame (" + e.Message + ").")
@@ -674,29 +717,43 @@ Protected Class IDECommunicator
 		    Return MergeReply(frames)
 		  End If
 		  
-		  // No marker. Warnings and nothing else means the script is still running: every caller sends
-		  // a script that ends in a Print, so an output frame is always coming eventually.
-		  // Answering with the warning here would pick the wrong part AND close the socket
-		  // on a reply still in flight - the two failures this class exists to avoid. Fall
-		  // through to parking instead.
-		  Var onlyWarnings As Boolean = frames.Count > 0
-		  For Each f As JSONItem In frames
-		    If ReplyKind(f) <> "warning" Then
-		      onlyWarnings = False
-		      Exit
-		    End If
-		  Next f
-		  
-		  If frames.Count > 0 And Not onlyWarnings Then
-		    // Closed here, once our reply is in hand, and that leaves one residual risk worth
-		    // stating rather than hiding: a further frame for this tag arriving after the
-		    // kSplitReplyWindowMS window would be written into a closed peer. None has been
-		    // observed - every measured multi-part reply arrived within milliseconds - and the
-		    // alternative, parking every answered socket, would hold the IDE's single connection
-		    // slot after each request. The window is the trade.
+		  // An error stopped the script, so nothing more is coming: the answer is complete.
+		  If sawScriptStop Then
 		    sock.Close
 		    LastErrorMessage = ""
 		    Return MergeReply(frames)
+		  End If
+		  
+		  // No marker was appended, so the old rule stands: a window after the first part. A reply
+		  // of warnings alone still parks, since the output they are about is still to come.
+		  If Not markerExpected And Not ideClosed And frames.Count > 0 Then
+		    Var onlyWarnings As Boolean = True
+		    For Each f As JSONItem In frames
+		      If ReplyKind(f) <> "warning" Then
+		        onlyWarnings = False
+		        Exit
+		      End If
+		    Next f
+		    If Not onlyWarnings Then
+		      sock.Close
+		      LastErrorMessage = ""
+		      Return MergeReply(frames)
+		    End If
+		  End If
+		  
+		  // The IDE closed the connection before the answer was complete - it quit or crashed, or
+		  // dropped the connection. Nothing can be written into it any more, so there is nothing to
+		  // protect; but the IDE may already have run the script, so it must not be sent again. It
+		  // is parked all the same, so that the candidate loop stops and nothing is resent;
+		  // DrainPending finds the connection closed and releases it on its next pass, so it
+		  // blocks nothing.
+		  If ideClosed Then
+		    AddPending(sock, tag, script)
+		    mParkedThisRequest = True
+		    LastErrorMessage = "The Xojo IDE closed the connection before it finished answering. It may have " + _
+		    "quit or crashed, or it may have run the script before closing it, so the request is not being " + _
+		    "sent again. Check the IDE, then try again."
+		    Return Nil
 		  End If
 		  
 		  // Data arrived for some other tag and nothing for ours. This used to close the socket
@@ -709,14 +766,15 @@ Protected Class IDECommunicator
 		    LogVerbose("IDE request " + tag + ": data from " + candidatePath + " carried another tag; ours is still outstanding.")
 		  End If
 		  
-		  // The IDE accepted the request - connect and write both succeeded - and has not
-		  // answered within the timeout. Do NOT close the socket. The IDE will answer when
-		  // it is done, and a write into a closed peer raises SIGPIPE, which the Xojo IDE
-		  // does not ignore: it dies mid-build, with no crash report. Park the socket open
-		  // instead; DrainPending releases it once the IDE has replied or has gone away.
+		  // The IDE accepted the request - connect and write both succeeded - and its answer is not
+		  // complete within the timeout: the script is still running, even if part of its output
+		  // has arrived. Do NOT close the socket. The IDE will write the rest when it is done, and
+		  // a write into a closed peer raises SIGPIPE, which the Xojo IDE does not ignore: it dies
+		  // mid-build, with no crash report. Park the socket open instead; DrainPending releases
+		  // it once the IDE has finished or has gone away.
 		  AddPending(sock, tag, script)
 		  mParkedThisRequest = True
-		  LastErrorMessage = "The Xojo IDE accepted the request but has not answered within " + timeoutMS.ToString + _
+		  LastErrorMessage = "The Xojo IDE accepted the request but has not finished answering it within " + timeoutMS.ToString + _
 		  "ms. It is most likely busy - a build, or a modal dialog waiting for a click - and it will finish " + _
 		  "the request regardless. The connection is kept open so the IDE can reply safely; that reply will " + _
 		  "be discarded. Further requests are refused until the IDE has answered." + _
@@ -763,31 +821,39 @@ Protected Class IDECommunicator
 		  If obj = Nil Then Return "output"
 		  If obj.Count = 0 Then Return "empty"
 		  
-		  If obj.HasKey("scriptError") Then
-		    Var items As JSONItem = obj.Value("scriptError")
-		    If items <> Nil And items.IsArray Then
-		      For i As Integer = 0 To items.Count - 1
-		        Var entry As JSONItem = items.ChildAt(i)
-		        Var kind As String = If(entry <> Nil And entry.HasKey("type"), entry.Value("type").StringValue, "")
-		        If Not kind.Lowercase.EndsWith("warning") Then Return "error"
-		      Next i
-		      Return "warning"
+		  // The casts below assume the IDE's shapes - an array under scriptError, objects under
+		  // buildError - and throw on anything else. This runs after a request was written, where
+		  // an exception escaping would skip both answering and parking the request, so a shape
+		  // the IDE has never sent counts as an error: reported, rather than lost.
+		  Try
+		    If obj.HasKey("scriptError") Then
+		      Var items As JSONItem = obj.Value("scriptError")
+		      If items <> Nil And items.IsArray Then
+		        For i As Integer = 0 To items.Count - 1
+		          Var entry As JSONItem = items.ChildAt(i)
+		          Var kind As String = If(entry <> Nil And entry.HasKey("type"), entry.Value("type").StringValue, "")
+		          If Not kind.Lowercase.EndsWith("warning") Then Return "error"
+		        Next i
+		        Return "warning"
+		      End If
+		      Return "error"
 		    End If
+
+		    If obj.HasKey("buildError") Then
+		      Var be As JSONItem = obj.Value("buildError")
+		      If be <> Nil And be.HasKey("errors") Then
+		        Var errs As JSONItem = be.Value("errors")
+		        If errs <> Nil And errs.Count > 0 Then Return "error"
+		      End If
+		      If be <> Nil And be.HasKey("warnings") Then
+		        Var warns As JSONItem = be.Value("warnings")
+		        If warns <> Nil And warns.Count > 0 Then Return "warning"
+		      End If
+		      Return "empty"
+		    End If
+		  Catch e As RuntimeException
 		    Return "error"
-		  End If
-		  
-		  If obj.HasKey("buildError") Then
-		    Var be As JSONItem = obj.Value("buildError")
-		    If be <> Nil And be.HasKey("errors") Then
-		      Var errs As JSONItem = be.Value("errors")
-		      If errs <> Nil And errs.Count > 0 Then Return "error"
-		    End If
-		    If be <> Nil And be.HasKey("warnings") Then
-		      Var warns As JSONItem = be.Value("warnings")
-		      If warns <> Nil And warns.Count > 0 Then Return "warning"
-		    End If
-		    Return "empty"
-		  End If
+		  End Try
 		  
 		  If obj.HasKey("missingFiles") Or obj.HasKey("openErrors") Or obj.HasKey("loadError") Then Return "error"
 		  
@@ -1048,7 +1114,9 @@ Protected Class IDECommunicator
 		  /// backlog on both platforms, so the request is delivered either way, and refusing
 		  /// to stack more behind it is what keeps the message honest.
 		  
-		  mPending.Add(New PendingRequest(sock, tag, script))
+		  // The same test SendAndReceive used to decide whether to append the end marker, on the
+		  // same script, so the two cannot disagree about whether a marker is coming.
+		  mPending.Add(New PendingRequest(sock, tag, script, Not EndsWithLineContinuation(script)))
 		End Sub
 	#tag EndMethod
 	#tag Method, Flags = &h0
@@ -1066,11 +1134,9 @@ Protected Class IDECommunicator
 		    
 		    Try
 		      req.Sock.Poll
-		      // A reply is whole only once its NUL terminator arrives. Releasing on the first
-		      // byte would close the socket on a reply still being written, which is the
-		      // SIGPIPE this whole mechanism exists to avoid - and on Windows the transport is
-		      // TCP, where a large reply is split across segments as a matter of course.
-		      If req.ReplyComplete Then
+		      // Released only once the answer is complete - its end marker, or an error that
+		      // stopped the script - never on a part followed by quiet: see ReplyComplete.
+		      If req.ReplyComplete(Self) Then
 		        done = True
 		        reason = "the IDE answered it (reply discarded)"
 		      ElseIf Not req.Sock.IsConnected Then

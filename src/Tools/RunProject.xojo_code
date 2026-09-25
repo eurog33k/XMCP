@@ -70,17 +70,20 @@ Inherits MCPKit.Tool
 	#tag Method, Flags = &h21
 		Private Function ParseDoCommandResult(resultJSON As JSONItem) As MCPKit.ToolResult
 		  /// Parses the JSON returned by DoCommand "RunApp" / "BuildApp".
-		  /// Success: empty {} → "Project launched in debug mode."
+		  /// Success: nothing to report ({}, or a buildError with empty lists) → "Project launched in debug mode."
 		  /// Failure: {"buildError": {"errors": [...]}} → formatted error list.
 
-		  If resultJSON.Count = 0 Then
-		    Return MCPKit.ToolResult.Success("Project launched in debug mode.")
-		  End If
 
 		  // buildError, missingFiles, openErrors, loadError - formatted by the shared
 		  // classifier in IDECommunicator so every tool reports them the same way.
 		  Var envelope As New JSONItem
 		  envelope.Value("response") = resultJSON
+		  
+		  // Nothing to report is success: {} as well as a buildError whose lists are empty. The
+		  // classifier decides it, so this tool and analyze_project cannot disagree about it.
+		  If App.IDE.ReplyKind(envelope) = "empty" Then
+		    Return MCPKit.ToolResult.Success("Project launched in debug mode.")
+		  End If
 		  Var diagnostics As String = App.IDE.ReplyDiagnostics(envelope)
 		  If diagnostics <> "" Then
 		    Var warnings As String = App.IDE.ReplyWarnings(envelope)
