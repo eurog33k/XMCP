@@ -452,7 +452,7 @@ Validates a `.xojo_code` or `.xojo_window` file on disk for known structural err
 
 ### File Tools (opt-in)
 
-Direct filesystem access for MCP clients with no file tools of their own (e.g. Claude Desktop). **Disabled by default** — start XMCP with `--enable-file-tools` to register them, bringing the tool count to 34. Access is restricted to an allowlist of directories given via `--file-root` (comma-separated absolute paths, default `/tmp`); see [File tool sandbox](#file-tool-sandbox) below. If your MCP client already has file tools (Claude Code does), leave these off.
+Direct filesystem access for MCP clients with no file tools of their own (e.g. Claude Desktop). **Disabled by default** — start XMCP with `--enable-file-tools` to register them, bringing the tool count to 34 on macOS and 33 on Windows. Access is restricted to an allowlist of directories given via `--file-root` (comma-separated absolute paths, default `/tmp`); see [File tool sandbox](#file-tool-sandbox) below. If your MCP client already has file tools (Claude Code does), leave these off.
 
 #### `write_file`, `read_file`, `hash_file`
 
