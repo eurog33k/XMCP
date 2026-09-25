@@ -92,7 +92,7 @@ Inherits MCPKit.Tool
 		      If waitingFocus <> Nil Then Return waitingFocus
 		      If hostCreated Then Call CloseUnsavedWindow
 		      Return MCPKit.ToolResult.Failure("Could not focus the project before closing it. " + _
-		      "Nothing was changed. Reload the project manually instead.")
+		      "Nothing was changed. Reload the project manually instead." + CleanupStillWaiting)
 		    End If
 
 		    Call CloseFocusedProject
@@ -107,7 +107,7 @@ Inherits MCPKit.Tool
 		    If SamePath(afterClose, target) Then
 		      If hostCreated Then Call CloseUnsavedWindow
 		      Return MCPKit.ToolResult.Failure("The project did not close, so it has not been " + _
-		      "reloaded from disk. Nothing was changed.")
+		      "reloaded from disk. Nothing was changed." + CleanupStillWaiting)
 		    End If
 
 		    // 4. Reopen the target from disk.
@@ -124,6 +124,13 @@ Inherits MCPKit.Tool
 		    If hostCreated Then
 		      Call CloseUnsavedWindow
 		      Call OpenAndVerify(target)  // restore focus to the user's project
+
+		      // Checked first: while the close is still waiting, the window count below is turned
+		      // down and reads as -1, which would pass for "closed" and report a plain success.
+		      Var stillClosing As String = CleanupStillWaiting
+		      If stillClosing <> "" Then
+		        Return MCPKit.ToolResult.Success("Project reloaded from disk: " + target.NativePath + stillClosing)
+		      End If
 
 		      If WindowCountFromIDE > windowsBefore Then
 		        Return MCPKit.ToolResult.Success("Project reloaded from disk: " + target.NativePath + _
@@ -335,6 +342,27 @@ Inherits MCPKit.Tool
 		  "Wait for it, or click any dialog it is showing. " + what + EndOfLine + EndOfLine + _
 		  "Do not quit or restart Claude Code (or whichever MCP client you use) meanwhile: on macOS and " + _
 		  "Linux the Xojo IDE crashes if it answers over a connection that has been closed.")
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function CleanupStillWaiting() As String
+		  /// "", unless closing the temporary empty project is still waiting for the IDE - then a
+		  /// note to add to whatever the tool reports.
+		  ///
+		  /// On Windows the tool opens an empty project so that closing the user's one cannot quit
+		  /// the IDE, and closes it again before returning. That close is the tool's last request,
+		  /// so nothing after it would notice it stalling: the result would read as finished while
+		  /// further requests are turned down, with no warning against quitting meanwhile.
+		  
+		  If App.IDE = Nil Or App.IDE.DrainPending = 0 Then Return ""
+		  
+		  Return EndOfLine + EndOfLine + "The Xojo IDE has not finished closing the temporary empty " + _
+		  "project XMCP opened for this, so further requests are turned down until it answers. Wait " + _
+		  "for it, or click any dialog it is showing; close that empty project manually if it is " + _
+		  "still open afterwards." + EndOfLine + EndOfLine + _
+		  "Do not quit or restart Claude Code (or whichever MCP client you use) meanwhile: on macOS and " + _
+		  "Linux the Xojo IDE crashes if it answers over a connection that has been closed."
 		End Function
 	#tag EndMethod
 
