@@ -107,11 +107,11 @@ Documentation tools skip step 3 and operate on the in-memory doc cache instead.
 
 `IDECommunicator.SendAndReceive(script As String) As JSONItem` sends:
 ```json
-{"tag": "xmcp_1", "script": "Print Location"}
+{"tag": "xmcp_3f9a1c2e_1", "script": "Print Location"}
 ```
 And receives:
 ```json
-{"tag": "xmcp_1", "response": "App.Constructor"}
+{"tag": "xmcp_3f9a1c2e_1", "response": "App.Constructor"}
 ```
 
 The IDE script language is the Xojo IDE Scripting language (not Xojo itself). Scripts use `Print` to return values. Use `RunIDEScript` tool or `mcp__xmcp__run_ide_script` to experiment with scripts interactively.

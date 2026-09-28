@@ -3,6 +3,8 @@ Protected Class IDECommunicator
 	#tag Method, Flags = &h0
 		Sub Constructor()
 		  mTagCounter = 0
+		  // Random per process, so no two XMCP processes share a tag. See NextTag.
+		  mTagPrefix = "xmcp_" + EncodeHex(Crypto.GenerateRandomBytes(4)).Lowercase + "_"
 		  mSocketPath = FindIPCPath
 		  LastErrorMessage = ""
 		  mConnected = False
@@ -57,9 +59,17 @@ Protected Class IDECommunicator
 	#tag Method, Flags = &h0
 		Function NextTag() As String
 		  /// Returns a unique tag string for each request to correlate requests with responses.
+		  ///
+		  /// Unique across processes, not only within one. An answer the IDE owes on a connection
+		  /// that has gone away - its XMCP was killed or restarted while a request was waiting - is
+		  /// delivered on the next connection instead (measured on Windows, where the IDE survives
+		  /// that). With a plain counter every XMCP process numbers from xmcp_1, so a new process
+		  /// could reach the same number and take another process's late answer - end marker
+		  /// included - for its own. The random part, chosen once per process, rules that out;
+		  /// the counter keeps tags unique within the process.
 
 		  mTagCounter = mTagCounter + 1
-		  Return "xmcp_" + mTagCounter.ToString
+		  Return mTagPrefix + mTagCounter.ToString
 
 		End Function
 	#tag EndMethod
@@ -1205,6 +1215,10 @@ Protected Class IDECommunicator
 
 	#tag Property, Flags = &h1
 		Protected mTagCounter As Integer
+	#tag EndProperty
+
+	#tag Property, Flags = &h21
+		Private mTagPrefix As String
 	#tag EndProperty
 
 
