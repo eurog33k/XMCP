@@ -806,8 +806,10 @@ Protected Class IDECommunicator
 		  /// Classifies one reply envelope by what its "response" carries:
 		  ///   "output"  - a string (what the script printed), or an object that is none of the below
 		  ///   "empty"   - an empty object: the IDE's answer to a script that printed nothing
-		  ///   "warning" - diagnostics that are warnings only; the script or build still ran
-		  ///   "error"   - scriptError with errors, buildError with errors, missingFiles, openErrors, loadError
+		  ///   "warning" - diagnostics that are warnings only; the script or build still ran - including
+		  ///               an openErrors result whose every entry says severity "warning"
+		  ///   "error"   - scriptError with errors, buildError with errors, missingFiles, loadError, any
+		  ///               other openErrors
 		  ///   "unknown" - no "response" key at all
 		  ///
 		  /// scriptError is a heterogeneous array: each entry has a "type" that is
@@ -870,11 +872,59 @@ Protected Class IDECommunicator
 		    Return "error"
 		  End Try
 		  
-		  If obj.HasKey("missingFiles") Or obj.HasKey("openErrors") Or obj.HasKey("loadError") Then Return "error"
+		  If obj.HasKey("missingFiles") Or obj.HasKey("loadError") Then Return "error"
+		  // openErrors is not always an error: opening a project saved by an older Xojo answers
+		  // {"openErrors":[{"loadError":{"type":"IDE Version Conflict", ..., "severity":"warning"}}]}
+		  // (measured on 2026r2.1), and the project does open. Only a result that says "warning"
+		  // for every entry counts as one; anything else, or anything unreadable, stays an error.
+		  If obj.HasKey("openErrors") Then
+		    If OpenErrorsAreWarnings(obj.Value("openErrors")) Then Return "warning"
+		    Return "error"
+		  End If
 		  
 		  Return "output"
 		End Function
 	#tag EndMethod
+	#tag Method, Flags = &h21
+		Private Function OpenErrorsAreWarnings(value As Variant) As Boolean
+		  /// True only when an openErrors result is a non-empty list in which every entry says, and
+		  /// only says, severity "warning" - on the entry itself or on an object inside it, which is
+		  /// where the IDE put it in the one such result seen. An entry with no severity, any other
+		  /// severity, or a shape that cannot be read makes it an error: a real error must never be
+		  /// passed off as a warning, and a warning reported as an error is the lesser mistake.
+		  ///
+		  /// The severity is compared as a whole word, ignoring case - it is a value, unlike the
+		  /// scriptError types, which are matched by their "warning" ending.
+		  
+		  Try
+		    Var items As JSONItem = value
+		    If items = Nil Or Not items.IsArray Or items.Count = 0 Then Return False
+		    For i As Integer = 0 To items.Count - 1
+		      Var entry As JSONItem = items.ChildAt(i)
+		      If entry = Nil Or entry.IsArray Then Return False
+		      Var severities() As String
+		      If entry.HasKey("severity") Then severities.Add(entry.Value("severity").StringValue)
+		      For Each key As String In entry.Keys
+		        Var v As Variant = entry.Value(key)
+		        If v.Type = Variant.TypeObject Then
+		          Var inner As JSONItem = v
+		          If inner <> Nil And Not inner.IsArray And inner.HasKey("severity") Then
+		            severities.Add(inner.Value("severity").StringValue)
+		          End If
+		        End If
+		      Next key
+		      If severities.Count = 0 Then Return False
+		      For Each severity As String In severities
+		        If severity.Trim.Compare("warning", ComparisonOptions.CaseInsensitive) <> 0 Then Return False
+		      Next severity
+		    Next i
+		    Return True
+		  Catch e As RuntimeException
+		    Return False
+		  End Try
+		End Function
+	#tag EndMethod
+
 	#tag Method, Flags = &h0
 		Function ReplyDiagnostics(envelope As JSONItem) As String
 		  /// The reply's blocking diagnostics as readable text, or "" when there are none -
@@ -920,7 +970,7 @@ Protected Class IDECommunicator
 		  If obj.HasKey("missingFiles") Then
 		    lines.Add("The IDE needs something configured before it can build: " + obj.Value("missingFiles").StringValue)
 		  End If
-		  If obj.HasKey("openErrors") Then
+		  If obj.HasKey("openErrors") And Not OpenErrorsAreWarnings(obj.Value("openErrors")) Then
 		    lines.Add("The project reported errors while opening: " + JSONItem(obj.Value("openErrors")).ToString)
 		  End If
 		  If obj.HasKey("loadError") Then
@@ -979,6 +1029,10 @@ Protected Class IDECommunicator
 		          If warns <> Nil And warns.Count > 0 Then lines.Add(FormatDiagnosticList(warns, "Warning"))
 		        End If
 		      End If
+		      If obj.HasKey("openErrors") And OpenErrorsAreWarnings(obj.Value("openErrors")) Then
+		        Var text As String = FormatOpenWarnings(obj.Value("openErrors"))
+		        If text <> "" Then lines.Add(text)
+		      End If
 		    Catch e As RuntimeException
 		    End Try
 		  Next obj
@@ -986,6 +1040,42 @@ Protected Class IDECommunicator
 		  Return String.FromArray(lines, EndOfLine)
 		End Function
 	#tag EndMethod
+	#tag Method, Flags = &h21
+		Private Function FormatOpenWarnings(value As Variant) As String
+		  /// One readable line per entry of an openErrors result that OpenErrorsAreWarnings accepted,
+		  /// e.g. "Warning while opening the project: IDE Version Conflict (projectVersion 2026.011,
+		  /// ideVersion 2026.021)". Every field but type and severity is listed, since only one such
+		  /// result has been seen and the others' fields are not known.
+		  
+		  Var lines() As String
+		  Try
+		    Var items As JSONItem = value
+		    For i As Integer = 0 To items.Count - 1
+		      Var entry As JSONItem = items.ChildAt(i)
+		      For Each key As String In entry.Keys
+		        Var v As Variant = entry.Value(key)
+		        If v.Type <> Variant.TypeObject Then Continue
+		        Var inner As JSONItem = v
+		        Var kind As String = If(inner.HasKey("type"), inner.Value("type").StringValue, key)
+		        Var details() As String
+		        For Each field As String In inner.Keys
+		          If field.Compare("type", ComparisonOptions.CaseSensitive) = 0 Then Continue
+		          If field.Compare("severity", ComparisonOptions.CaseSensitive) = 0 Then Continue
+		          details.Add(field + " " + inner.Value(field).StringValue)
+		        Next field
+		        Var line As String = "Warning while opening the project: " + kind
+		        If details.Count > 0 Then line = line + " (" + String.FromArray(details, ", ") + ")"
+		        lines.Add(line)
+		      Next key
+		    Next i
+		  Catch e As RuntimeException
+		    // Already classified as a warning, so it must not vanish: say so without the details.
+		    If lines.Count = 0 Then lines.Add("Warning while opening the project (its details could not be read).")
+		  End Try
+		  Return String.FromArray(lines, EndOfLine)
+		End Function
+	#tag EndMethod
+
 	#tag Method, Flags = &h21
 		Private Function FormatScriptErrors(items As JSONItem, warningsOnly As Boolean) As String
 		  /// One line per scriptError entry of the requested severity. The IDE wraps the

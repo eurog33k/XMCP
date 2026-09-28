@@ -61,7 +61,7 @@ Inherits MCPKit.Tool
 		  // A compiler warning about the script arrives as a separate reply part; report it
 		  // with the output rather than instead of it.
 		  Var warnings As String = App.IDE.ReplyWarnings(response)
-		  Var suffix As String = If(warnings = "", "", EndOfLine + EndOfLine + "The IDE also reported warnings about this script (it still ran):" + EndOfLine + warnings)
+		  Var suffix As String = If(warnings = "", "", EndOfLine + EndOfLine + "The IDE also reported warnings (the script still ran):" + EndOfLine + warnings)
 
 		  If response.HasKey("response") Then
 		    Var resp As Variant = response.Value("response")
