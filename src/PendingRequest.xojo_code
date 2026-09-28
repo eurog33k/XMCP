@@ -1,11 +1,14 @@
 #tag Class
 Protected Class PendingRequest
 	#tag Method, Flags = &h0
-		Sub Constructor(replySocket As IPCSocket, requestTag As String, requestScript As String, endMarkerExpected As Boolean)
+		Sub Constructor(replySocket As IPCSocket, requestTag As String, requestScript As String, endMarkerExpected As Boolean, unframed As String)
 		  Sock = replySocket
 		  Tag = requestTag
 		  Script = requestScript
 		  MarkerExpected = endMarkerExpected
+		  // The start of a part the live reader had read when the request parked, if any: the rest
+		  // arrives here, and the part can only be read whole.
+		  Buffer = unframed
 		  SinceUS = System.Microseconds
 		  LastDataUS = System.Microseconds
 		End Sub
@@ -25,8 +28,8 @@ Protected Class PendingRequest
 		  /// IDE writes the rest into a closed peer. Parts for another tag say nothing about this
 		  /// request and are ignored.
 		  ///
-		  /// A script that ends in a line continuation has no marker appended, so for it any part
-		  /// of its own ends the answer, as before. On top of either, the connection must have
+		  /// A script that ends in a line continuation has no marker appended, so for it any part of
+		  /// its own that is not warnings alone ends the answer - the live reader's rule for it. On top of either, the connection must have
 		  /// been quiet for kQuietAfterFrameMS, so that a trailing warning is in before the close.
 		  ///
 		  /// Parts are NUL-terminated JSON; on Windows the transport is TCP, which splits a large
@@ -49,7 +52,11 @@ Protected Class PendingRequest
 		    Try
 		      Var response As New JSONItem(frame)
 		      If response.HasKey("tag") And response.Value("tag").StringValue = Tag Then
-		        If Not MarkerExpected Or owner.IsEndMarker(response, Tag) Or owner.StopsScript(response) Then
+		        If MarkerExpected Then
+		          If owner.IsEndMarker(response, Tag) Or owner.StopsScript(response) Then AnswerEnded = True
+		        ElseIf owner.ReplyKind(response) <> "warning" Then
+		          // No marker is coming. As in the live reader, a part of warnings alone does not end
+		          // the answer - the output it is about is still to come - and any other part does.
 		          AnswerEnded = True
 		        End If
 		      End If

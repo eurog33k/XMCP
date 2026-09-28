@@ -41,11 +41,11 @@ Inherits MCPKit.Tool
 		  If response.HasKey("response") Then
 		    Var resp As Variant = response.Value("response")
 
-		    // DoCommand returns a JSON string we printed — parse it.
-		    // Happy path: we send `Print ""` after DoCommand "BuildApp",
-		    // so a successful build yields an empty string here (not JSON).
-		    // Anything else non-JSON is unexpected and should not be reported
-		    // as success without surfacing the raw text to the caller.
+		    // DoCommand "BuildApp" answers with a JSON object as the response value: {} on success,
+		    // a buildError (or another of the shapes ParseDoCommandResult reads) otherwise. The
+		    // `Print ""` that follows it also answers {}, not an empty string. A string arrives
+		    // only if the IDE ever sends the result as text, so it is read as JSON too - and text
+		    // that is not JSON is reported as it is rather than as success.
 		    If resp.Type = Variant.TypeString Then
 		      Var respStr As String = resp.StringValue
 		      If respStr.Trim = "" Then

@@ -109,10 +109,10 @@ Protected Class IDECommunicator
 		  // behind that one and give up on it too. Say so instead; DrainPending notices
 		  // when the IDE has caught up and the next call goes through normally.
 		  If DrainPending > 0 Then
-		    // "Has not finished answering", not "has not answered": for 250ms after the IDE's answer
-		    // starts arriving, XMCP is still collecting it (see PendingRequest.ReplyComplete) and the
-		    // request is still held, so a new one is still turned down - correctly, but saying the IDE
-		    // "has not answered" would then be untrue.
+		    // "Has not finished answering", not "has not answered": a waiting request can have part of
+		    // its answer in already - the IDE sends each Print as it runs - and it is held until the
+		    // answer is complete and 250 ms have passed without more (see PendingRequest.ReplyComplete).
+		    // Saying the IDE "has not answered" would then be untrue.
 		    LastErrorMessage = "The Xojo IDE is still busy with an earlier request and has not finished answering it:" + _
 		    EndOfLine + PendingSummary + EndOfLine + _
 		    "No new request was sent. Something is keeping the IDE busy - usually a build, or a dialog in " + _
@@ -244,8 +244,9 @@ Protected Class IDECommunicator
 	
 	#tag Method, Flags = &h0
 		Function RunScript(script As String, timeoutMS As Integer = 10000) As MCPKit.ToolResult
-		  /// Sends an IDE script and converts the reply into a ToolResult. Thirteen tools go
-		  /// through here - set_code, constant_value, get_code, select_project_item and the rest -
+		  /// Sends an IDE script and converts the reply into a ToolResult. Fourteen tools go
+		  /// through here - set_code, constant_value, get_code, select_project_item, get_project_info
+		  /// and the rest -
 		  /// so this is the path most of XMCP reports through.
 		  ///
 		  /// It now reports through the same classifier as run_ide_script, build_project,
@@ -608,7 +609,7 @@ Protected Class IDECommunicator
 		    // If the connection is really broken, DrainPending finds that on its next poll - the
 		    // poll throws or the socket reports itself closed - and releases it within one idle
 		    // pass, so a dead socket does not hold the IDE's connection slot.
-		    AddPending(sock, tag, script)
+		    AddPending(sock, tag, script, "")
 		    mParkedThisRequest = True
 		    LastErrorMessage = "Writing the request to the Xojo IDE failed partway (" + e.Message + "). " + _
 		    "It may or may not have arrived, so it is not being resent, and the connection is kept " + _
@@ -763,7 +764,7 @@ Protected Class IDECommunicator
 		  // DrainPending finds the connection closed and releases it on its next pass, so it
 		  // blocks nothing.
 		  If ideClosed Then
-		    AddPending(sock, tag, script)
+		    AddPending(sock, tag, script, buffer)
 		    mParkedThisRequest = True
 		    LastErrorMessage = "The Xojo IDE closed the connection before it finished answering. It may have " + _
 		    "quit or crashed, or it may have run the script before closing it, so the request is not being " + _
@@ -787,7 +788,12 @@ Protected Class IDECommunicator
 		  // a write into a closed peer raises SIGPIPE, which the Xojo IDE does not ignore: it dies
 		  // mid-build, with no crash report. Park the socket open instead; DrainPending releases
 		  // it once the IDE has finished or has gone away.
-		  AddPending(sock, tag, script)
+		  //
+		  // Whatever was read but not yet framed goes with it: the time limit can fall in the middle of
+		  // a part - on Windows a large one routinely arrives in pieces - and if that part is the end
+		  // marker or the error that ends the answer, dropping its first half would leave the parked
+		  // request unable to see its own end, refusing every request until the two-hour give-up.
+		  AddPending(sock, tag, script, buffer)
 		  mParkedThisRequest = True
 		  LastErrorMessage = "The Xojo IDE accepted the request but has not finished answering it within " + timeoutMS.ToString + _
 		  "ms. It is most likely busy - a build, or a modal dialog waiting for a click - and it will finish " + _
@@ -907,10 +913,11 @@ Protected Class IDECommunicator
 		      For Each key As String In entry.Keys
 		        Var v As Variant = entry.Value(key)
 		        If v.Type = Variant.TypeObject Then
+		          // Every object in the entry has to say it is a warning - one that says nothing
+		          // would otherwise ride along and be shown as a warning too.
 		          Var inner As JSONItem = v
-		          If inner <> Nil And Not inner.IsArray And inner.HasKey("severity") Then
-		            severities.Add(inner.Value("severity").StringValue)
-		          End If
+		          If inner = Nil Or inner.IsArray Or Not inner.HasKey("severity") Then Return False
+		          severities.Add(inner.Value("severity").StringValue)
 		        End If
 		      Next key
 		      If severities.Count = 0 Then Return False
@@ -954,28 +961,41 @@ Protected Class IDECommunicator
 		  
 		  Var lines() As String
 		  
-		  If obj.HasKey("scriptError") Then
-		    Var text As String = FormatScriptErrors(obj.Value("scriptError"), False)
-		    If text <> "" Then lines.Add("Script errors:" + EndOfLine + text)
-		  End If
-		  If obj.HasKey("buildError") Then
-		    Var be As JSONItem = obj.Value("buildError")
-		    If be <> Nil And be.HasKey("errors") Then
-		      Var errs As JSONItem = be.Value("errors")
-		      If errs <> Nil And errs.Count > 0 Then
-		        lines.Add("Build errors (" + errs.Count.ToString + "):" + EndOfLine + FormatDiagnosticList(errs, "Error"))
+		  // ReplyKind already calls a reply an error when its shape is not the one the IDE is known
+		  // to send (a scriptError that is not a list of objects, a loadError that is a plain string).
+		  // Reading the details out of such a reply can throw, and an exception here would escape the
+		  // tool as an unexplained runtime error instead of the error it is. Say what arrived instead.
+		  Try
+		    If obj.HasKey("scriptError") Then
+		      Var text As String = FormatScriptErrors(obj.Value("scriptError"), False)
+		      If text <> "" Then lines.Add("Script errors:" + EndOfLine + text)
+		    End If
+		    If obj.HasKey("buildError") Then
+		      Var be As JSONItem = obj.Value("buildError")
+		      If be <> Nil And be.HasKey("errors") Then
+		        Var errs As JSONItem = be.Value("errors")
+		        If errs <> Nil And errs.Count > 0 Then
+		          lines.Add("Build errors (" + errs.Count.ToString + "):" + EndOfLine + FormatDiagnosticList(errs, "Error"))
+		        End If
 		      End If
 		    End If
-		  End If
-		  If obj.HasKey("missingFiles") Then
-		    lines.Add("The IDE needs something configured before it can build: " + obj.Value("missingFiles").StringValue)
-		  End If
-		  If obj.HasKey("openErrors") And Not OpenErrorsAreWarnings(obj.Value("openErrors")) Then
-		    lines.Add("The project reported errors while opening: " + JSONItem(obj.Value("openErrors")).ToString)
-		  End If
-		  If obj.HasKey("loadError") Then
-		    lines.Add("The project could not be loaded: " + JSONItem(obj.Value("loadError")).ToString)
-		  End If
+		    If obj.HasKey("missingFiles") Then
+		      lines.Add("The IDE needs something configured before it can build: " + obj.Value("missingFiles").StringValue)
+		    End If
+		    If obj.HasKey("openErrors") And Not OpenErrorsAreWarnings(obj.Value("openErrors")) Then
+		      lines.Add("The project reported errors while opening: " + JSONItem(obj.Value("openErrors")).ToString)
+		    End If
+		    If obj.HasKey("loadError") Then
+		      lines.Add("The project could not be loaded: " + JSONItem(obj.Value("loadError")).ToString)
+		    End If
+		  Catch e As RuntimeException
+		    Var raw As String = "(unreadable)"
+		    Try
+		      raw = obj.ToString
+		    Catch e2 As RuntimeException
+		    End Try
+		    Return "The IDE reported an error in a form XMCP does not recognise: " + raw
+		  End Try
 		  
 		  If lines.Count = 0 Then Return "The IDE returned an error: " + obj.ToString
 		  Return String.FromArray(lines, EndOfLine)
@@ -1052,20 +1072,14 @@ Protected Class IDECommunicator
 		    Var items As JSONItem = value
 		    For i As Integer = 0 To items.Count - 1
 		      Var entry As JSONItem = items.ChildAt(i)
+		      // Wherever OpenErrorsAreWarnings found a severity, there is a warning to show: on the
+		      // entry itself, and on each object inside it. Showing only one of the two would let a
+		      // result count as a warning and then show nothing.
+		      If entry.HasKey("severity") Then lines.Add(OpenWarningLine(entry, "project"))
 		      For Each key As String In entry.Keys
 		        Var v As Variant = entry.Value(key)
 		        If v.Type <> Variant.TypeObject Then Continue
-		        Var inner As JSONItem = v
-		        Var kind As String = If(inner.HasKey("type"), inner.Value("type").StringValue, key)
-		        Var details() As String
-		        For Each field As String In inner.Keys
-		          If field.Compare("type", ComparisonOptions.CaseSensitive) = 0 Then Continue
-		          If field.Compare("severity", ComparisonOptions.CaseSensitive) = 0 Then Continue
-		          details.Add(field + " " + inner.Value(field).StringValue)
-		        Next field
-		        Var line As String = "Warning while opening the project: " + kind
-		        If details.Count > 0 Then line = line + " (" + String.FromArray(details, ", ") + ")"
-		        lines.Add(line)
+		        lines.Add(OpenWarningLine(v, key))
 		      Next key
 		    Next i
 		  Catch e As RuntimeException
@@ -1073,6 +1087,27 @@ Protected Class IDECommunicator
 		    If lines.Count = 0 Then lines.Add("Warning while opening the project (its details could not be read).")
 		  End Try
 		  Return String.FromArray(lines, EndOfLine)
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function OpenWarningLine(item As JSONItem, fallbackKind As String) As String
+		  /// "Warning while opening the project: <type> (<field value>, ...)" for one openErrors
+		  /// warning - the type if it has one, fallbackKind otherwise, then every plain field but
+		  /// type and severity. Nested objects are left out: FormatOpenWarnings gives them their own line.
+		  
+		  Var kind As String = If(item.HasKey("type"), item.Value("type").StringValue, fallbackKind)
+		  Var details() As String
+		  For Each field As String In item.Keys
+		    If field.Compare("type", ComparisonOptions.CaseSensitive) = 0 Then Continue
+		    If field.Compare("severity", ComparisonOptions.CaseSensitive) = 0 Then Continue
+		    Var v As Variant = item.Value(field)
+		    If v.Type = Variant.TypeObject Then Continue
+		    details.Add(field + " " + v.StringValue)
+		  Next field
+		  Var line As String = "Warning while opening the project: " + kind
+		  If details.Count > 0 Then line = line + " (" + String.FromArray(details, ", ") + ")"
+		  Return line
 		End Function
 	#tag EndMethod
 
@@ -1201,7 +1236,7 @@ Protected Class IDECommunicator
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
-		Private Sub AddPending(sock As IPCSocket, tag As String, script As String)
+		Private Sub AddPending(sock As IPCSocket, tag As String, script As String, unframed As String)
 		  /// Parks a socket whose request the IDE accepted but has not answered yet.
 		  ///
 		  /// The IDE runs scripts on its main thread, so during a build - or behind a modal
@@ -1221,7 +1256,7 @@ Protected Class IDECommunicator
 		  
 		  // The same test SendAndReceive used to decide whether to append the end marker, on the
 		  // same script, so the two cannot disagree about whether a marker is coming.
-		  mPending.Add(New PendingRequest(sock, tag, script, Not EndsWithLineContinuation(script)))
+		  mPending.Add(New PendingRequest(sock, tag, script, Not EndsWithLineContinuation(script), unframed))
 		End Sub
 	#tag EndMethod
 	#tag Method, Flags = &h0

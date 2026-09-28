@@ -67,9 +67,11 @@ Inherits MCPKit.Tool
 		      If WindowCountFromIDE <= windowsBefore Then
 		        Var waiting As MCPKit.ToolResult = StillWaiting("opening a second workspace window", False, target.NativePath, TempProjectNote(True))
 		        If waiting <> Nil Then Return waiting
+		        // The request did reach the IDE, so an empty project may have opened even though the
+		        // count does not show it - say so, as StillWaiting does when the request is still waiting.
 		        Return MCPKit.ToolResult.Failure("Could not open a second workspace window, which is " + _
 		        "needed because closing the last project would quit the IDE on Windows. Nothing was " + _
-		        "changed. Reload the project manually instead.")
+		        "changed to your project. Reload it manually instead. " + TempProjectNote(True))
 		      End If
 		      hostCreated = True
 		    ElseIf windowsBefore < 1 Then
@@ -102,7 +104,9 @@ Inherits MCPKit.Tool
 		      Var waitingClose As MCPKit.ToolResult = StillWaiting("closing the project", True, target.NativePath, If(hostCreated, TempProjectNote(False), ""))
 		      If waitingClose <> Nil Then Return waitingClose
 		      Return MCPKit.ToolResult.Failure("The Xojo IDE stopped responding while closing the " + _
-		      "project: " + App.IDE.LastErrorMessage + " Reopen the project manually: " + target.NativePath)
+		      "project: " + App.IDE.LastErrorMessage + " Reopen the project manually: " + target.NativePath + _
+		      If(hostCreated, " - and only then close the empty project XMCP opened for this, since on " + _
+		      "Windows closing the last open project quits the IDE.", ""))
 		    End If
 		    If SamePath(afterClose, target) Then
 		      Var tempNote As String = If(hostCreated, CloseTempProject(windowsBefore), "")

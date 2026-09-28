@@ -76,12 +76,23 @@ Inherits MCPKit.Tool
 		      If resp.StringValue = "" Then Return NoOutputResult(suffix)
 		      Return MCPKit.ToolResult.Success(resp.StringValue + suffix)
 		    Else
-		      Var respJSON As JSONItem = response.Value("response")
 		      // An empty object is what the IDE answers when the script printed nothing. It is
 		      // not necessarily a failure, but returning a bare "{}" reads like output. So is a
-		      // warnings-only object: the script ran, it just printed nothing.
-		      If respJSON.Count = 0 Or App.IDE.ReplyKind(response) = "warning" Then Return NoOutputResult(suffix)
-		      Return MCPKit.ToolResult.Success(respJSON.ToString + suffix)
+		      // warnings-only object: the script ran, it just printed nothing. The classifier
+		      // decides both, as it does in every other tool - an object can be "empty" without
+		      // having no keys, such as a build result whose lists are both empty.
+		      Var kind As String = App.IDE.ReplyKind(response)
+		      If kind = "empty" Or kind = "warning" Then Return NoOutputResult(suffix)
+		      // Not every value that is not a string is an object: the classifier counts a number
+		      // or a boolean as output too, and converting one to a JSONItem throws.
+		      Var text As String
+		      Try
+		        Var respJSON As JSONItem = response.Value("response")
+		        text = respJSON.ToString
+		      Catch e As RuntimeException
+		        text = resp.StringValue
+		      End Try
+		      Return MCPKit.ToolResult.Success(text + suffix)
 		    End If
 		  End If
 
