@@ -62,7 +62,15 @@ Inherits MCPKit.Tool
 		        Return MCPKit.ToolResult.Failure("Unexpected non-JSON response: " + respStr)
 		      End Try
 		    Else
-		      Var respJSON As JSONItem = response.Value("response")
+		      // Not every value that is not a string is an object - the classifier counts a number or
+		      // a boolean as output - and converting one to a JSONItem throws. The same guard as
+		      // run_ide_script's.
+		      Var respJSON As JSONItem
+		      Try
+		        respJSON = response.Value("response")
+		      Catch e As RuntimeException
+		      End Try
+		      If respJSON = Nil Then Return MCPKit.ToolResult.Failure("Unexpected response from IDE: " + response.ToString)
 		      Return ParseAnalyzeResult(respJSON)
 		    End If
 		  End If
@@ -88,56 +96,66 @@ Inherits MCPKit.Tool
 		  /// scriptError - goes to ReplyDiagnostics. Those used to fall through to a raw JSON dump
 		  /// under "Unexpected response", which is the same gap that was fixed in build_project.
 		  
-		  If resultJSON = Nil Or resultJSON.Count = 0 Then
+		  If resultJSON = Nil Then Return MCPKit.ToolResult.Success("No errors or warnings found.")
+		  
+		  // Wrapped the way the IDE delivers a reply, so the shared classifier can judge it - the same
+		  // test for "nothing to report" as build_project's, which also covers a buildError whose lists
+		  // are both empty.
+		  Var envelope As New JSONItem
+		  envelope.Value("response") = resultJSON
+		  If App.IDE.ReplyKind(envelope) = "empty" Then
 		    Return MCPKit.ToolResult.Success("No errors or warnings found.")
 		  End If
 		  
+		  // A buildError in a shape this cannot read throws partway; it then falls through to the
+		  // shared classifier below, which reports it as it arrived instead of losing it.
 		  If resultJSON.HasKey("buildError") Then
-		    Var be As JSONItem = resultJSON.Value("buildError")
-		    Var lines() As String
-		    Var errorCount As Integer = 0
-		    Var warningCount As Integer = 0
-		    
-		    If be <> Nil And be.HasKey("errors") Then
-		      Var errs As JSONItem = be.Value("errors")
-		      If errs <> Nil And errs.Count > 0 Then
-		        errorCount = errs.Count
-		        lines.Add(App.IDE.FormatDiagnosticList(errs, "Error"))
+		    Try
+		      Var be As JSONItem = resultJSON.Value("buildError")
+		      Var lines() As String
+		      Var errorCount As Integer = 0
+		      Var warningCount As Integer = 0
+		      
+		      If be <> Nil And be.HasKey("errors") Then
+		        Var errs As JSONItem = be.Value("errors")
+		        If errs <> Nil And errs.Count > 0 Then
+		          errorCount = errs.Count
+		          lines.Add(App.IDE.FormatDiagnosticList(errs, "Error"))
+		        End If
 		      End If
-		    End If
-		    
-		    If be <> Nil And be.HasKey("warnings") Then
-		      Var warns As JSONItem = be.Value("warnings")
-		      If warns <> Nil And warns.Count > 0 Then
-		        warningCount = warns.Count
-		        lines.Add(App.IDE.FormatDiagnosticList(warns, "Warning", True))
+		      
+		      If be <> Nil And be.HasKey("warnings") Then
+		        Var warns As JSONItem = be.Value("warnings")
+		        If warns <> Nil And warns.Count > 0 Then
+		          warningCount = warns.Count
+		          lines.Add(App.IDE.FormatDiagnosticList(warns, "Warning", True))
+		        End If
 		      End If
-		    End If
-		    
-		    If lines.Count = 0 Then
-		      Return MCPKit.ToolResult.Success("No errors or warnings found.")
-		    End If
-		    
-		    Var summary As String = ""
-		    If errorCount > 0 Then summary = errorCount.ToString + " error(s)"
-		    If warningCount > 0 Then
-		      If summary <> "" Then summary = summary + ", "
-		      summary = summary + warningCount.ToString + " warning(s)"
-		    End If
-		    
-		    Var result As String = "Analysis results (" + summary + "):" + EndOfLine + String.FromArray(lines, EndOfLine)
-		    
-		    If errorCount > 0 Then
-		      Return MCPKit.ToolResult.Failure(result)
-		    Else
-		      Return MCPKit.ToolResult.Success(result)
-		    End If
+		      
+		      If lines.Count = 0 Then
+		        Return MCPKit.ToolResult.Success("No errors or warnings found.")
+		      End If
+		      
+		      Var summary As String = ""
+		      If errorCount > 0 Then summary = errorCount.ToString + " error(s)"
+		      If warningCount > 0 Then
+		        If summary <> "" Then summary = summary + ", "
+		        summary = summary + warningCount.ToString + " warning(s)"
+		      End If
+		      
+		      Var result As String = "Analysis results (" + summary + "):" + EndOfLine + String.FromArray(lines, EndOfLine)
+		      
+		      If errorCount > 0 Then
+		        Return MCPKit.ToolResult.Failure(result)
+		      Else
+		        Return MCPKit.ToolResult.Success(result)
+		      End If
+		    Catch e As RuntimeException
+		    End Try
 		  End If
 		  
-		  // Not a buildError. Wrap it the way the IDE delivers a reply so the shared classifier
-		  // can read it, and report whatever it recognises.
-		  Var envelope As New JSONItem
-		  envelope.Value("response") = resultJSON
+		  // Not a buildError, or one that could not be read: report whatever the shared classifier
+		  // recognises.
 		  
 		  Var diagnostics As String = App.IDE.ReplyDiagnostics(envelope)
 		  If diagnostics <> "" Then Return MCPKit.ToolResult.Failure(diagnostics)

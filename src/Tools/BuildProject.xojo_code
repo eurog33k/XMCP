@@ -58,8 +58,15 @@ Inherits MCPKit.Tool
 		        Return MCPKit.ToolResult.Failure("Unexpected non-JSON response from BuildApp: " + respStr)
 		      End Try
 		    Else
-		      // Already a JSON object in the response envelope.
-		      Var respJSON As JSONItem = response.Value("response")
+		      // Not every value that is not a string is an object - the classifier counts a number or
+		      // a boolean as output - and converting one to a JSONItem throws. The same guard as
+		      // run_ide_script's.
+		      Var respJSON As JSONItem
+		      Try
+		        respJSON = response.Value("response")
+		      Catch e As RuntimeException
+		      End Try
+		      If respJSON = Nil Then Return MCPKit.ToolResult.Failure("Unexpected response from IDE: " + response.ToString)
 		      Return ParseDoCommandResult(respJSON)
 		    End If
 		  End If

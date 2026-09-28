@@ -448,6 +448,20 @@ Protected Class IDECommunicator
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
+		Private Sub CloseAnswered(sock As IPCSocket)
+		  /// Closes the socket of a request whose answer is complete. The IDE has nothing more to write,
+		  /// so a failing close cannot hurt it - and it must not throw the answer away: guarded like
+		  /// DrainPending's close.
+		  
+		  Try
+		    sock.Close
+		  Catch e As RuntimeException
+		    LogVerbose("Closing an answered connection failed (" + e.Message + "); the answer stands.")
+		  End Try
+		End Sub
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
 		Private Function EmptyMessageExplanation(kind As String) As String
 		  /// What to show when the IDE reports an error or warning without any message.
 		  
@@ -699,8 +713,11 @@ Protected Class IDECommunicator
 		          Else
 		            frames.Add(response)
 		            If StopsScript(response) Then sawScriptStop = True
-		            // Only where no marker is coming does a window after a part end the wait.
-		            If Not sawEndMarker And Not windowStarted And (sawScriptStop Or Not markerExpected) Then
+		            // Only where no marker is coming does a window after a part end the wait - and then
+		            // not after a part of warnings alone, whose output is still to come: the same rule
+		            // as the decision below and as PendingRequest.ReplyComplete.
+		            If Not sawEndMarker And Not windowStarted And _
+		              (sawScriptStop Or (Not markerExpected And ReplyKind(response) <> "warning")) Then
 		              windowStarted = True
 		              collectUntilUS = System.Microseconds + (kSplitReplyWindowMS * 1000.0)
 		            End If
@@ -727,7 +744,7 @@ Protected Class IDECommunicator
 		  // gets the empty reply the IDE would have sent for Print "", which is what every caller
 		  // already understands as "no value".
 		  If sawEndMarker Then
-		    sock.Close
+		    CloseAnswered(sock)
 		    LastErrorMessage = ""
 		    If frames.Count = 0 Then Return EmptyReply(tag)
 		    Return MergeReply(frames)
@@ -735,7 +752,7 @@ Protected Class IDECommunicator
 		  
 		  // An error stopped the script, so nothing more is coming: the answer is complete.
 		  If sawScriptStop Then
-		    sock.Close
+		    CloseAnswered(sock)
 		    LastErrorMessage = ""
 		    Return MergeReply(frames)
 		  End If
@@ -751,7 +768,7 @@ Protected Class IDECommunicator
 		      End If
 		    Next f
 		    If Not onlyWarnings Then
-		      sock.Close
+		      CloseAnswered(sock)
 		      LastErrorMessage = ""
 		      Return MergeReply(frames)
 		    End If
@@ -893,37 +910,38 @@ Protected Class IDECommunicator
 	#tag EndMethod
 	#tag Method, Flags = &h21
 		Private Function OpenErrorsAreWarnings(value As Variant) As Boolean
-		  /// True only when an openErrors result is a non-empty list in which every entry says, and
-		  /// only says, severity "warning" - on the entry itself or on an object inside it, which is
-		  /// where the IDE put it in the one such result seen. An entry with no severity, any other
-		  /// severity, or a shape that cannot be read makes it an error: a real error must never be
-		  /// passed off as a warning, and a warning reported as an error is the lesser mistake.
+		  /// True only for the shape the IDE has been measured to send for a warning when opening a
+		  /// project: a non-empty list of entries, each holding only objects, each object saying
+		  /// severity "warning" and holding only plain values - {"loadError":{"type":"IDE Version
+		  /// Conflict","projectVersion":"2026.011","ideVersion":"2026.021","severity":"warning"}}.
+		  /// Anything else - a severity on the entry itself, a plain value beside the objects, an
+		  /// object one level deeper, another severity - is an error, reported as it arrived.
 		  ///
-		  /// The severity is compared as a whole word, ignoring case - it is a value, unlike the
-		  /// scriptError types, which are matched by their "warning" ending.
+		  /// Deliberately narrow. Only one such result has been seen, and a rule written around
+		  /// guesses at other shapes let parts of a reply be accepted as a warning and then not be
+		  /// shown. This way everything accepted is exactly what FormatOpenWarnings can show in
+		  /// full, and a real error is never passed off as a warning.
+		  ///
+		  /// The severity is compared as a whole word, trimmed and ignoring case - it is a value,
+		  /// unlike the scriptError types, which are matched by their "warning" ending.
 		  
 		  Try
 		    Var items As JSONItem = value
 		    If items = Nil Or Not items.IsArray Or items.Count = 0 Then Return False
 		    For i As Integer = 0 To items.Count - 1
 		      Var entry As JSONItem = items.ChildAt(i)
-		      If entry = Nil Or entry.IsArray Then Return False
-		      Var severities() As String
-		      If entry.HasKey("severity") Then severities.Add(entry.Value("severity").StringValue)
+		      If entry = Nil Or entry.IsArray Or entry.Count = 0 Then Return False
 		      For Each key As String In entry.Keys
 		        Var v As Variant = entry.Value(key)
-		        If v.Type = Variant.TypeObject Then
-		          // Every object in the entry has to say it is a warning - one that says nothing
-		          // would otherwise ride along and be shown as a warning too.
-		          Var inner As JSONItem = v
-		          If inner = Nil Or inner.IsArray Or Not inner.HasKey("severity") Then Return False
-		          severities.Add(inner.Value("severity").StringValue)
-		        End If
+		        If v.Type <> Variant.TypeObject Then Return False
+		        Var inner As JSONItem = v
+		        If inner = Nil Or inner.IsArray Or Not inner.HasKey("severity") Then Return False
+		        If inner.Value("severity").StringValue.Trim.Compare("warning", ComparisonOptions.CaseInsensitive) <> 0 Then Return False
+		        For Each field As String In inner.Keys
+		          Var fv As Variant = inner.Value(field)
+		          If fv.Type = Variant.TypeObject Then Return False
+		        Next field
 		      Next key
-		      If severities.Count = 0 Then Return False
-		      For Each severity As String In severities
-		        If severity.Trim.Compare("warning", ComparisonOptions.CaseInsensitive) <> 0 Then Return False
-		      Next severity
 		    Next i
 		    Return True
 		  Catch e As RuntimeException
@@ -994,7 +1012,9 @@ Protected Class IDECommunicator
 		      raw = obj.ToString
 		    Catch e2 As RuntimeException
 		    End Try
-		    Return "The IDE reported an error in a form XMCP does not recognise: " + raw
+		    // Keep what was already read: those lines are correct, the raw text only adds the rest.
+		    lines.Add("The IDE reported an error in a form XMCP does not recognise: " + raw)
+		    Return String.FromArray(lines, EndOfLine)
 		  End Try
 		  
 		  If lines.Count = 0 Then Return "The IDE returned an error: " + obj.ToString
@@ -1062,24 +1082,23 @@ Protected Class IDECommunicator
 	#tag EndMethod
 	#tag Method, Flags = &h21
 		Private Function FormatOpenWarnings(value As Variant) As String
-		  /// One readable line per entry of an openErrors result that OpenErrorsAreWarnings accepted,
+		  /// One readable line per object of an openErrors result that OpenErrorsAreWarnings accepted,
 		  /// e.g. "Warning while opening the project: IDE Version Conflict (projectVersion 2026.011,
-		  /// ideVersion 2026.021)". Every field but type and severity is listed, since only one such
-		  /// result has been seen and the others' fields are not known.
+		  /// ideVersion 2026.021)". That shape holds only objects of plain values, so every part of it
+		  /// is shown. Each object is read on its own: one that cannot be read gets a line saying so,
+		  /// rather than hiding the ones after it.
 		  
 		  Var lines() As String
 		  Try
 		    Var items As JSONItem = value
 		    For i As Integer = 0 To items.Count - 1
 		      Var entry As JSONItem = items.ChildAt(i)
-		      // Wherever OpenErrorsAreWarnings found a severity, there is a warning to show: on the
-		      // entry itself, and on each object inside it. Showing only one of the two would let a
-		      // result count as a warning and then show nothing.
-		      If entry.HasKey("severity") Then lines.Add(OpenWarningLine(entry, "project"))
 		      For Each key As String In entry.Keys
-		        Var v As Variant = entry.Value(key)
-		        If v.Type <> Variant.TypeObject Then Continue
-		        lines.Add(OpenWarningLine(v, key))
+		        Try
+		          lines.Add(OpenWarningLine(entry.Value(key), key))
+		        Catch e As RuntimeException
+		          lines.Add("Warning while opening the project (one part of it could not be read).")
+		        End Try
 		      Next key
 		    Next i
 		  Catch e As RuntimeException
@@ -1092,9 +1111,9 @@ Protected Class IDECommunicator
 
 	#tag Method, Flags = &h21
 		Private Function OpenWarningLine(item As JSONItem, fallbackKind As String) As String
-		  /// "Warning while opening the project: <type> (<field value>, ...)" for one openErrors
-		  /// warning - the type if it has one, fallbackKind otherwise, then every plain field but
-		  /// type and severity. Nested objects are left out: FormatOpenWarnings gives them their own line.
+		  /// "Warning while opening the project: <type> (<field value>, ...)" for one object of an
+		  /// openErrors warning - the type if it has one, fallbackKind (its key) otherwise, then every
+		  /// field but type and severity. OpenErrorsAreWarnings admits only plain values here.
 		  
 		  Var kind As String = If(item.HasKey("type"), item.Value("type").StringValue, fallbackKind)
 		  Var details() As String

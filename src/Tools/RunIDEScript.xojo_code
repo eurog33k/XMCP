@@ -92,6 +92,8 @@ Inherits MCPKit.Tool
 		      Catch e As RuntimeException
 		        text = resp.StringValue
 		      End Try
+		      // A JSON null reads as nothing at all - "no value", the same as an empty string.
+		      If text = "" Then Return NoOutputResult(suffix)
 		      Return MCPKit.ToolResult.Success(text + suffix)
 		    End If
 		  End If

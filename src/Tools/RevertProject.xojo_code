@@ -157,8 +157,9 @@ Inherits MCPKit.Tool
 		    If target <> Nil And target.Exists Then nativePath = target.NativePath
 
 		    // 3. Close, discarding unsaved IDE changes: reloading from disk is the whole point.
-		    //    The False suppresses the save prompt. The reply is ignored - closing the project
-		    //    tears down the script host that would have answered it, so step 4 is the test.
+		    //    The False suppresses the save prompt. The reply is not what counts: whether the project
+		    //    actually closed is, and only step 4's question shows that. (Measured on 2026r2.1: the
+		    //    script carries on after CloseProject and its reply does arrive.)
 		    Call App.IDE.SendAndReceive("CloseProject(False)" + EndOfLine + "Print ""closed""", 20000)
 
 		    // Compare against the target, not against "" - if the IDE has another project open
@@ -206,9 +207,10 @@ Inherits MCPKit.Tool
 
 	#tag Method, Flags = &h21
 		Private Function CloseFocusedProject() As Boolean
-		  /// Closes the frontmost project, discarding unsaved changes. The reply is not
-		  /// reliable - on some platforms closing the project takes the script host with it -
-		  /// so callers verify with ProjectPathFromIDE instead.
+		  /// Closes the frontmost project, discarding unsaved changes. Callers verify the effect with
+		  /// ProjectPathFromIDE rather than trusting the reply: the reply says the script ran, not that
+		  /// the project closed. (An older note here said closing takes the script host with it;
+		  /// measured on 2026r2.1 on macOS and Windows, it does not - the script carries on and answers.)
 
 		  Call App.IDE.SendAndReceive("CloseProject(False)" + EndOfLine + "Print ""closed""", 20000)
 		  Return True
@@ -235,8 +237,8 @@ Inherits MCPKit.Tool
 		  /// tool created. Only called when we created it, so there is no other unsaved window
 		  /// to confuse it with.
 		  ///
-		  /// Selecting the window and closing it are separate requests: CloseProject tears down
-		  /// the script that would have reported back.
+		  /// Selecting the window and closing it are separate requests, so that the close acts on the
+		  /// window the first request found and left selected, and its result can be checked apart.
 
 		  Var findScript As String = "Dim found As Integer = -1" + EndOfLine + _
 		  "Dim i As Integer" + EndOfLine + _
