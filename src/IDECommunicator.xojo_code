@@ -62,11 +62,13 @@ Protected Class IDECommunicator
 		  ///
 		  /// Unique across processes, not only within one. An answer the IDE owes on a connection
 		  /// that has gone away - its XMCP was killed or restarted while a request was waiting - is
-		  /// delivered on the next connection instead (measured on Windows, where the IDE survives
-		  /// that). With a plain counter every XMCP process numbers from xmcp_1, so a new process
-		  /// could reach the same number and take another process's late answer - end marker
-		  /// included - for its own. The random part, chosen once per process, rules that out;
-		  /// the counter keeps tags unique within the process.
+		  /// handed to the next client that connects, ahead of that client's own answer and with its
+		  /// original tag (measured against the raw socket on Windows, where the IDE survives that).
+		  /// With a plain counter every XMCP process numbers from xmcp_1, so a new process's first
+		  /// request could carry the same tag and take the late answer - end marker included - for
+		  /// its own. Reproduced on Windows with the old tags: a second XMCP's Print "B-own-answer"
+		  /// came back as the first one's "A-late-answer", reported as success. The random part,
+		  /// chosen once per process, rules that out; the counter keeps tags unique within the process.
 
 		  mTagCounter = mTagCounter + 1
 		  Return mTagPrefix + mTagCounter.ToString
@@ -703,7 +705,10 @@ Protected Class IDECommunicator
 		            End If
 		          End If
 		        Else
-		          LogVerbose("IDE request " + tag + ": ignoring a frame for another tag (stale or unsolicited).")
+		          // Name the other tag: a late answer meant for another request - often another XMCP
+		          // process's - is told apart from a malformed frame only by what it carries.
+		          Var otherTag As String = If(response.HasKey("tag"), response.Value("tag").StringValue, "(none)")
+		          LogVerbose("IDE request " + tag + ": ignoring a frame for another tag, " + otherTag + " (stale or unsolicited).")
 		        End If
 		      Catch e As RuntimeException
 		        // Any exception, not only JSONException. The write has already succeeded here, so
