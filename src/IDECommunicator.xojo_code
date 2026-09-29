@@ -499,6 +499,58 @@ Protected Class IDECommunicator
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
+		Function BuildErrorIsKnownShape(value As Variant) As Boolean
+		  /// True when a buildError holds only what the IDE has been measured to send: an "errors"
+		  /// list, a "warnings" list, or both (2026r2.1, macOS and Windows, for CheckProjectErrors and
+		  /// BuildApp alike). Anything else - another key, a list that is not a list, not an object at
+		  /// all - is a shape nobody has seen, which must not be taken for a clean build.
+		  ///
+		  /// Public so analyze_project, which formats a build result its own way, decides the same.
+		  
+		  Try
+		    If value.Type <> Variant.TypeObject Then Return False
+		    Var be As JSONItem = value
+		    // Not even empty: a clean build or analysis answers {} with no buildError at all
+		    // (measured), so a buildError holding nothing is a shape nobody has seen either.
+		    If be = Nil Or be.IsArray Or be.Count = 0 Then Return False
+		    For Each key As String In be.Keys
+		      If key.Compare("errors", ComparisonOptions.CaseSensitive) <> 0 And _
+		        key.Compare("warnings", ComparisonOptions.CaseSensitive) <> 0 Then Return False
+		      Var list As Variant = be.Value(key)
+		      If list.Type <> Variant.TypeObject Then Return False
+		      Var items As JSONItem = list
+		      If items = Nil Or Not items.IsArray Then Return False
+		    Next key
+		    Return True
+		  Catch e As RuntimeException
+		    Return False
+		  End Try
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Function ScriptErrorHasError(value As Variant) As Boolean
+		  /// True when a scriptError value reports a compile or runtime error: any entry whose type
+		  /// does not end in "warning" (a missing type counts as an error), or a value that is not a
+		  /// list at all. The one test, shared by ReplyKind and StopsScript, so the two cannot differ.
+		  
+		  Try
+		    If value.Type <> Variant.TypeObject Then Return True
+		    Var items As JSONItem = value
+		    If items = Nil Or Not items.IsArray Then Return True
+		    For i As Integer = 0 To items.Count - 1
+		      Var entry As JSONItem = items.ChildAt(i)
+		      Var kind As String = If(entry <> Nil And entry.HasKey("type"), entry.Value("type").StringValue, "")
+		      If Not kind.Lowercase.EndsWith("warning") Then Return True
+		    Next i
+		    Return False
+		  Catch e As RuntimeException
+		    Return True
+		  End Try
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
 		Function StopsScript(envelope As JSONItem) As Boolean
 		  /// True when this reply part is a compile or runtime error. The IDE stops the script
 		  /// there, so nothing more follows - no further output and no end marker - and the
@@ -510,10 +562,16 @@ Protected Class IDECommunicator
 		  ///
 		  /// Public for the same reason as IsEndMarker.
 
-		  If ReplyKind(envelope) <> "error" Then Return False
+		  // Judged on the scriptError entries themselves, not on the reply as a whole: a reply can be
+		  // an error because of another key while its scriptError holds only warnings, and then the
+		  // script did not stop - ending the answer there would close on a script still running.
+		  If envelope = Nil Or Not envelope.HasKey("response") Then Return False
 		  Try
-		    Var obj As JSONItem = envelope.Value("response")
-		    Return obj <> Nil And obj.HasKey("scriptError")
+		    Var resp As Variant = envelope.Value("response")
+		    If resp.Type <> Variant.TypeObject Then Return False
+		    Var obj As JSONItem = resp
+		    If obj = Nil Or Not obj.HasKey("scriptError") Then Return False
+		    Return ScriptErrorHasError(obj.Value("scriptError"))
 		  Catch e As RuntimeException
 		    Return False
 		  End Try
@@ -664,10 +722,18 @@ Protected Class IDECommunicator
 		  Var windowStarted As Boolean = False
 		  Var ideClosed As Boolean = False
 		  
-		  // Once the marker is in, the short wait after it may run past the deadline: the answer
-		  // has arrived, and cutting that wait short would close the socket just before the
-		  // trailing warning is written into it. It is bounded by kAfterEndMarkerMS.
-		  While (System.Microseconds < deadlineUS Or sawEndMarker) And System.Microseconds < collectUntilUS
+		  // Once the answer has ended - its marker is in, or the window after an error that stopped
+		  // the script (or, with no marker, after its first part that is not warnings alone) has
+		  // started - the short wait after it may run past the deadline: the answer has arrived, and
+		  // cutting that wait short would close the socket just before a trailing part is written
+		  // into it. And if that wait runs out while a part is still half read - on Windows a part
+		  // can arrive in pieces - reading goes on until it is whole, for at most kPartialPartMS
+		  // more: closing mid-part would cut the IDE off in the middle of writing it. Both are
+		  // bounded; a normal answer leaves nothing half read and ends exactly as before.
+		  While (System.Microseconds < deadlineUS Or sawEndMarker Or windowStarted) And _
+		    (System.Microseconds < collectUntilUS Or _
+		    ((sawEndMarker Or windowStarted) And buffer.Trim <> "" And _
+		    System.Microseconds < collectUntilUS + (kPartialPartMS * 1000.0)))
 		    // Guarded like Connect and Write above, and like DrainPending's own Poll. The write
 		    // has already succeeded here, so the IDE may be executing the script; an exception
 		    // escaping would skip both the answer and the parking below, leaking an open socket
@@ -861,51 +927,53 @@ Protected Class IDECommunicator
 		  If obj = Nil Then Return "output"
 		  If obj.Count = 0 Then Return "empty"
 		  
-		  // The casts below assume the IDE's shapes - an array under scriptError, objects under
-		  // buildError - and throw on anything else. This runs after a request was written, where
-		  // an exception escaping would skip both answering and parking the request, so a shape
-		  // the IDE has never sent counts as an error: reported, rather than lost.
+		  // Every key that can carry an error is looked at, not only the first one found: a reply
+		  // counts as clean only if none of them reports anything. An error anywhere decides it;
+		  // otherwise a warning anywhere; otherwise it is empty. The shapes the IDE is known to send
+		  // each hold one of these keys (measured on 2026r2.1); a combination is judged the same way.
+		  // Casts that meet a shape the IDE has never sent throw, and this runs after a request was
+		  // written, where an exception escaping would skip both answering and parking it - so
+		  // anything unreadable counts as an error: reported, rather than lost.
+		  Var sawKnownKey As Boolean = False
+		  Var sawWarning As Boolean = False
 		  Try
+		    If obj.HasKey("missingFiles") Or obj.HasKey("loadError") Then Return "error"
+		    
 		    If obj.HasKey("scriptError") Then
-		      Var items As JSONItem = obj.Value("scriptError")
-		      If items <> Nil And items.IsArray Then
-		        For i As Integer = 0 To items.Count - 1
-		          Var entry As JSONItem = items.ChildAt(i)
-		          Var kind As String = If(entry <> Nil And entry.HasKey("type"), entry.Value("type").StringValue, "")
-		          If Not kind.Lowercase.EndsWith("warning") Then Return "error"
-		        Next i
-		        Return "warning"
-		      End If
-		      Return "error"
+		      sawKnownKey = True
+		      If ScriptErrorHasError(obj.Value("scriptError")) Then Return "error"
+		      // No error among its entries: warnings only, as before - also for an empty list, which the
+		      // old code called "warning" too, so no reply is classified differently for it.
+		      sawWarning = True
 		    End If
-
+		    
+		    // A build result counts as clean or as warnings only in the shape the IDE sends:
+		    // {"buildError":{"errors":[...]}} and/or "warnings":[...] - see BuildErrorIsKnownShape.
+		    // Any other shape is an error, rather than being passed off as a successful build.
 		    If obj.HasKey("buildError") Then
+		      sawKnownKey = True
+		      If Not BuildErrorIsKnownShape(obj.Value("buildError")) Then Return "error"
 		      Var be As JSONItem = obj.Value("buildError")
-		      If be <> Nil And be.HasKey("errors") Then
-		        Var errs As JSONItem = be.Value("errors")
-		        If errs <> Nil And errs.Count > 0 Then Return "error"
-		      End If
-		      If be <> Nil And be.HasKey("warnings") Then
-		        Var warns As JSONItem = be.Value("warnings")
-		        If warns <> Nil And warns.Count > 0 Then Return "warning"
-		      End If
-		      Return "empty"
+		      If be.HasKey("errors") And JSONItem(be.Value("errors")).Count > 0 Then Return "error"
+		      If be.HasKey("warnings") And JSONItem(be.Value("warnings")).Count > 0 Then sawWarning = True
+		    End If
+		    
+		    // openErrors is not always an error: opening a project saved by an older Xojo answers
+		    // {"openErrors":[{"loadError":{"type":"IDE Version Conflict", ..., "severity":"warning"}}]}
+		    // (measured on 2026r2.1), and the project does open. Only that exact shape counts as a
+		    // warning (OpenErrorsAreWarnings); anything else, or anything unreadable, is an error.
+		    If obj.HasKey("openErrors") Then
+		      sawKnownKey = True
+		      If Not OpenErrorsAreWarnings(obj.Value("openErrors")) Then Return "error"
+		      sawWarning = True
 		    End If
 		  Catch e As RuntimeException
 		    Return "error"
 		  End Try
 		  
-		  If obj.HasKey("missingFiles") Or obj.HasKey("loadError") Then Return "error"
-		  // openErrors is not always an error: opening a project saved by an older Xojo answers
-		  // {"openErrors":[{"loadError":{"type":"IDE Version Conflict", ..., "severity":"warning"}}]}
-		  // (measured on 2026r2.1), and the project does open. Only a result that says "warning"
-		  // for every entry counts as one; anything else, or anything unreadable, stays an error.
-		  If obj.HasKey("openErrors") Then
-		    If OpenErrorsAreWarnings(obj.Value("openErrors")) Then Return "warning"
-		    Return "error"
-		  End If
-		  
-		  Return "output"
+		  If Not sawKnownKey Then Return "output"
+		  If sawWarning Then Return "warning"
+		  Return "empty"
 		End Function
 	#tag EndMethod
 	#tag Method, Flags = &h21
@@ -988,7 +1056,10 @@ Protected Class IDECommunicator
 		      Var text As String = FormatScriptErrors(obj.Value("scriptError"), False)
 		      If text <> "" Then lines.Add("Script errors:" + EndOfLine + text)
 		    End If
-		    If obj.HasKey("buildError") Then
+		    If obj.HasKey("buildError") And Not BuildErrorIsKnownShape(obj.Value("buildError")) Then
+		      // Not the shape the IDE sends, which is why ReplyKind called it an error: show it whole.
+		      lines.Add("The IDE returned a build result XMCP does not recognise: " + JSONItem(obj.Value("buildError")).ToString)
+		    ElseIf obj.HasKey("buildError") Then
 		      Var be As JSONItem = obj.Value("buildError")
 		      If be <> Nil And be.HasKey("errors") Then
 		        Var errs As JSONItem = be.Value("errors")
@@ -1387,6 +1458,9 @@ Protected Class IDECommunicator
 	#tag EndConstant
 	
 	#tag Constant, Name = kAfterEndMarkerMS, Type = Double, Dynamic = False, Default = \"50", Scope = Private
+	#tag EndConstant
+
+	#tag Constant, Name = kPartialPartMS, Type = Double, Dynamic = False, Default = \"1000", Scope = Private
 	#tag EndConstant
 
 	#tag Constant, Name = kEndMarkerPrefix, Type = String, Dynamic = False, Default = \"xmcp-end:", Scope = Private

@@ -33,8 +33,8 @@ Inherits MCPKit.Tool
 
 		  #If TargetWindows Then
 		    // Windows quits the IDE when its last project window closes, so the target cannot
-		    // simply be closed and reopened. A second open workspace window prevents that, and
-		    // also keeps CloseProject from tearing down the running script.
+		    // simply be closed and reopened. A second open workspace window prevents that. (The
+		    // script itself carries on after CloseProject either way - measured on 2026r2.1.)
 		    //
 		    // CloseProject acts on the frontmost workspace window, and OpenFile on an
 		    // already-open project focuses it without reloading - that is what makes the
@@ -374,8 +374,11 @@ Inherits MCPKit.Tool
 		  Var count As Integer = WindowCountFromIDE
 		  If count = windowsBefore Then Return ""
 		  If count < 0 Then
+		    // The count itself can be the request left waiting - then say so, with the warning not to
+		    // quit, exactly as for the close; a success would otherwise hide it.
 		    Return " (note: could not check whether the temporary empty project XMCP opened was closed; " + _
-		    "if it is still open in the IDE, close it without saving)"
+		    "if it is still open in the IDE, close it without saving)" + _
+		    WaitingNote("checking whether the temporary empty project XMCP opened was closed", "")
 		  End If
 		  Return " (note: the temporary empty project XMCP opened could not be closed and is still open " + _
 		  "in the IDE; close it without saving)"

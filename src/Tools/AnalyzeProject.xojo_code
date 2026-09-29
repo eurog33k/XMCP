@@ -107,10 +107,13 @@ Inherits MCPKit.Tool
 		    Return MCPKit.ToolResult.Success("No errors or warnings found.")
 		  End If
 		  
-		  // A buildError in a shape this cannot read throws partway; it then falls through to the
-		  // shared classifier below, which reports it as it arrived instead of losing it.
-		  If resultJSON.HasKey("buildError") Then
-		    Try
+		  // This tool's own formatting is used only for the build result shape the IDE sends
+		  // (BuildErrorIsKnownShape - the same test the classifier uses); any other shape goes to the
+		  // shared classifier below, which reports it as it arrived. So does one whose entries this
+		  // cannot read: that throws partway, and the Catch falls through to the same place. HasKey
+		  // is inside the Try too - the reply need not be an object with keys at all.
+		  Try
+		    If resultJSON.HasKey("buildError") And App.IDE.BuildErrorIsKnownShape(resultJSON.Value("buildError")) Then
 		      Var be As JSONItem = resultJSON.Value("buildError")
 		      Var lines() As String
 		      Var errorCount As Integer = 0
@@ -150,12 +153,12 @@ Inherits MCPKit.Tool
 		      Else
 		        Return MCPKit.ToolResult.Success(result)
 		      End If
-		    Catch e As RuntimeException
-		    End Try
-		  End If
+		    End If
+		  Catch e As RuntimeException
+		  End Try
 		  
-		  // Not a buildError, or one that could not be read: report whatever the shared classifier
-		  // recognises.
+		  // Not a build result of the known shape, or one that could not be read: report whatever
+		  // the shared classifier recognises.
 		  
 		  Var diagnostics As String = App.IDE.ReplyDiagnostics(envelope)
 		  If diagnostics <> "" Then Return MCPKit.ToolResult.Failure(diagnostics)
